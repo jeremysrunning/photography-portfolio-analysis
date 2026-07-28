@@ -8,7 +8,12 @@ from urllib.parse import parse_qs, urlsplit
 import pytest
 
 from ppa.models import Asset, Gallery, Portfolio
-from ppa.sources import GallerySource, SourceError, SourcePreviewUnavailableError
+from ppa.sources import (
+    GallerySource,
+    SourceError,
+    SourcePreviewUnavailableError,
+    load_portfolio,
+)
 from ppa.sources.smugmug import SmugMugApiClient, SmugMugSource
 
 
@@ -61,14 +66,6 @@ class FakeGallerySource:
         with self.preview_stream:
             yield self.preview_stream
 
-    def load_portfolio(self) -> Portfolio:
-        portfolio = self.discover_portfolio()
-        galleries = tuple(
-            replace(gallery, assets=tuple(self.iter_assets(gallery)))
-            for gallery in self.iter_galleries(portfolio)
-        )
-        return replace(portfolio, galleries=galleries)
-
 
 def test_fake_source_exercises_complete_gallery_source_contract() -> None:
     source = FakeGallerySource()
@@ -86,8 +83,21 @@ def test_fake_source_exercises_complete_gallery_source_contract() -> None:
     assert source.preview_stream is not None
     assert source.preview_stream.closed
 
-    loaded = source.load_portfolio()
+    loaded = load_portfolio(source)
     assert loaded.galleries[0].assets == (asset,)
+
+
+def test_shared_loader_preserves_source_exceptions() -> None:
+    failure = SourceError("Source enumeration failed.")
+
+    class FailingGallerySource(FakeGallerySource):
+        def iter_galleries(self, portfolio: Portfolio) -> Iterator[Gallery]:
+            raise failure
+
+    with pytest.raises(SourceError) as raised:
+        load_portfolio(FailingGallerySource())
+
+    assert raised.value is failure
 
 
 def test_fake_source_normalizes_unavailable_preview() -> None:
@@ -177,7 +187,7 @@ def test_smugmug_source_loads_public_metadata_and_paginates() -> None:
     client = SmugMugApiClient("https://example.smugmug.com", "secret", transport)
     source = SmugMugSource("https://example.smugmug.com", "secret", client)
 
-    portfolio = source.load_portfolio()
+    portfolio = load_portfolio(source)
 
     assert isinstance(source, GallerySource)
     assert portfolio.title == "Example Photographer"

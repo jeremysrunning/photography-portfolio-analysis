@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from importlib import import_module
 
 from ppa.cli import main
@@ -38,8 +39,20 @@ def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys)
             assert url == "https://example.smugmug.com"
             assert api_key == "secret"
 
-        def load_portfolio(self) -> Portfolio:
-            return portfolio
+        def discover_portfolio(self) -> Portfolio:
+            return Portfolio(
+                source=portfolio.source,
+                source_id=portfolio.source_id,
+                title=portfolio.title,
+                source_url=portfolio.source_url,
+            )
+
+        def iter_galleries(self, discovered: Portfolio) -> Iterator[Gallery]:
+            assert discovered.source_id == portfolio.source_id
+            yield from portfolio.galleries
+
+        def iter_assets(self, gallery: Gallery) -> Iterator[Asset]:
+            yield from gallery.assets
 
     cli_module = import_module("ppa.cli.main")
     monkeypatch.setattr(cli_module, "SmugMugSource", FakeSource)

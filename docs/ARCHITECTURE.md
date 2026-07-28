@@ -40,11 +40,16 @@ Every gallery source exposes the same typed operations:
 - enumerate normalized assets for each gallery
 - enrich one normalized asset with available source metadata
 - open a temporary preview through a context manager
-- fully load a portfolio as a convenience composition of discovery and enumeration
 
 Metadata enrichment returns a new normalized asset and preserves unavailable fields as
 missing. Source adapters translate provider failures into the shared `SourceError`
 hierarchy so callers do not depend on provider-specific exceptions.
+
+The provider-agnostic `load_portfolio` service composes discovery and enumeration into
+the immutable normalized object graph. Composition lives outside source adapters so every
+provider constructs portfolios, galleries, and assets through the same implementation.
+Metadata enrichment remains a separate operation so ingestion behavior and resumable
+enrichment do not become coupled.
 
 The source owns every preview handle. A handle is valid only inside its `with` block; the
 source must close the stream and remove any temporary backing file when the block exits.
