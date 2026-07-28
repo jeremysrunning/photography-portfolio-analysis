@@ -7,7 +7,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from ppa.sources.base import SourceError, SourceRateLimitError
+from ppa.sources.base import (
+    SourceAuthenticationError,
+    SourceError,
+    SourceNotFoundError,
+    SourceRateLimitError,
+)
 
 JsonObject = dict[str, Any]
 
@@ -39,9 +44,11 @@ class UrlLibJsonTransport:
                 value = json.load(response)
         except HTTPError as error:
             if error.code in {401, 403}:
-                message = "SmugMug rejected the API key or the requested portfolio is not public."
+                raise SourceAuthenticationError(
+                    "The source rejected the credentials or the resource is not public."
+                ) from error
             elif error.code == 404:
-                message = "SmugMug could not find the requested portfolio resource."
+                raise SourceNotFoundError("The source resource was not found.") from error
             elif error.code == 429:
                 retry_after = error.headers.get("Retry-After")
                 try:
