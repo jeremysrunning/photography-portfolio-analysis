@@ -33,10 +33,16 @@ Portfolio
 
 ## SourceReference
 
-`SourceReference` contains a stable source identifier and an absolute HTTP or HTTPS
-source URL. The portfolio carries the source namespace, such as `smugmug`; child
-references are interpreted within that namespace. This avoids repeating the namespace
-on every child while retaining every entity's stable provider identity and URL.
+`SourceReference` currently contains a stable source identifier and an absolute HTTP or
+HTTPS source URL. This is an intentional Phase 1 constraint because every implemented
+source is network-backed. The portfolio carries the source namespace, such as `smugmug`;
+child references are interpreted within that namespace. This avoids repeating the
+namespace on every child while retaining every entity's stable provider identity and URL.
+
+A future local-folder source should extend this boundary to a validated URI/reference
+representation (or a separate source-reference variant) rather than weakening URL
+validation or placing filesystem behavior in analyzers. Local-folder support is not
+introduced by the current model.
 
 Source references identify remote records. They never imply that media content is
 stored locally.
@@ -83,6 +89,9 @@ the normalized model and are never persisted.
 Missing capture timestamps and preview URLs use `None`. Missing metadata keys remain
 absent, and explicitly supplied JSON `null` values remain `None`. The model does not use
 empty strings, zeroes, sentinel dates, or inferred values in place of missing evidence.
+Normalized value, EXIF, gallery, and portfolio mappings are defensively copied and deeply
+frozen during construction. Neither caller-owned input dictionaries nor nested lists and
+mappings can mutate normalized model state afterward.
 
 Capture timestamps preserve their recorded timezone information. Naive timestamps remain
 timezone-unknown; the model does not infer a timezone.
@@ -117,10 +126,10 @@ SQLite schema version 4 mirrors the normalized graph:
 - media type and nullable capture timestamps use explicit columns
 - extensible metadata, EXIF, measurements, observations, and findings use scoped JSON
 
-Saving and loading preserves semantic equality, including empty collections, missing
-values, non-photo and unknown media, source references, EXIF, timezone-aware timestamps,
-and one asset placed in multiple galleries. Version-2 and version-3 databases migrate
-forward without silently dropping records.
+Saving and loading preserves semantic equality, including immutable metadata mappings,
+empty collections, missing values, non-photo and unknown media, source references, EXIF,
+timezone-aware timestamps, and one asset placed in multiple galleries. Version-2 and
+version-3 databases migrate forward without silently dropping records.
 
 ## Existing Analytical Records
 
