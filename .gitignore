@@ -17,3 +17,10 @@ venv/
 *.sqlite
 *.sqlite3
 *.db
+*.wal
+*.shm
+*.sqlite-journal
+*.sqlite3-journal
+*.db-journal
+*-wal
+*-shm
