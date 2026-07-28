@@ -108,6 +108,41 @@ Generate the source-agnostic metadata baseline:
 ppa report baseline portfolio.sqlite3
 ```
 
+Enrich the saved SmugMug dataset with public image metadata:
+
+```powershell
+$env:PPA_SMUGMUG_API_KEY = "your-api-key"
+ppa enrich exif portfolio.sqlite3
+```
+
+EXIF enrichment uses SmugMug multi-get requests (25 images per request by default) and
+commits each returned asset immediately. It can be interrupted and safely rerun: completed
+assets are skipped, rate-limited requests remain pending, and failed assets are retried
+only when `--retry-failed` is supplied.
+
+Useful controls:
+
+```console
+ppa enrich exif portfolio.sqlite3 --limit 100
+ppa enrich exif portfolio.sqlite3 --batch-size 10
+ppa enrich exif portfolio.sqlite3 --retry-failed
+```
+
+Use `--limit` for a small initial validation run. Batch size must be between 1 and 100.
+The command reports pending, completed, and failed unique-asset counts before and after
+each run.
+
+Generate an equipment and exposure report after enrichment:
+
+```console
+ppa report equipment portfolio.sqlite3
+```
+
+The equipment report starts with evidence coverage, then describes the most frequently
+recorded camera and lens models, focal-length ranges and exact values, apertures, exposure
+times, ISO ranges and exact values, and the most frequently recorded camera in each capture
+year. Distribution percentages use only photographs where that EXIF field is available.
+
 The baseline distinguishes gallery placements from unique image identities and reports
 gallery-size distribution, capture range, orientation, file-format distribution, geotag
 coverage, and camera/lens metadata coverage. Non-photo media already present in a dataset

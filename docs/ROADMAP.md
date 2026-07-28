@@ -22,12 +22,13 @@ Completed:
 - structured logging and automated tests
 - saved-dataset inspection command
 - source-agnostic metadata baseline report
+- resumable, batched public EXIF enrichment
+- source-agnostic equipment and exposure report
 
 Next:
 
 - define temporary preview-fetching behavior before visual analysis is added
-- ingest public EXIF metadata for equipment and exposure analysis
-- add focused equipment and temporal analyzers
+- add focused temporal analyzers
 
 ### Goals
 

@@ -95,3 +95,68 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
     report_output = capsys.readouterr().out
     assert "Baseline report: Example Portfolio" in report_output
     assert "landscape: 1 (100.0%)" in report_output
+
+    assert main(["report", "equipment", str(database)]) == 0
+    equipment_output = capsys.readouterr().out
+    assert "Equipment report: Example Portfolio" in equipment_output
+
+
+def test_enrich_exif_updates_saved_asset(monkeypatch, tmp_path, capsys) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    portfolio = Portfolio(
+        source="smugmug",
+        source_id="example",
+        title="Example Portfolio",
+        source_url="https://example.smugmug.com",
+        galleries=(
+            Gallery(
+                source_id="gallery",
+                title="Gallery",
+                source_url="https://example.smugmug.com/gallery",
+                assets=(
+                    Asset(
+                        source_id="image-1",
+                        source_url="https://example.smugmug.com/image",
+                        gallery_source_id="gallery",
+                    ),
+                ),
+            ),
+        ),
+    )
+    with SQLitePortfolioRepository(database) as repository:
+        repository.save(portfolio)
+
+    class FakeClient:
+        def __init__(self, site_url, api_key) -> None:
+            assert site_url == portfolio.source_url
+            assert api_key == "secret"
+
+        def get_response(self, uri):
+            assert uri == "/api/v2/image/image-1!metadata"
+            return {
+                "ImageMetadata": {
+                    "Uri": "/api/v2/image/image-1!metadata",
+                    "Model": "Camera A",
+                }
+            }
+
+    cli_module = import_module("ppa.cli.main")
+    monkeypatch.setattr(cli_module, "SmugMugApiClient", FakeClient)
+
+    assert (
+        main(
+            [
+                "enrich",
+                "exif",
+                str(database),
+                "--api-key",
+                "secret",
+            ]
+        )
+        == 0
+    )
+    assert "Overall status: 1 completed, 0 pending, 0 failed" in capsys.readouterr().out
+    with SQLitePortfolioRepository(database) as repository:
+        enriched = repository.get("smugmug", "example")
+    assert enriched is not None
+    assert enriched.galleries[0].assets[0].exif["Model"] == "Camera A"

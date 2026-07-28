@@ -6,6 +6,7 @@ from datetime import datetime
 from statistics import median
 from typing import Any
 
+from ppa.analysis.assets import asset_value, text_value, unique_assets
 from ppa.models import Asset, Portfolio
 
 
@@ -52,12 +53,12 @@ class BaselineReport:
 def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     """Measure metadata coverage and broad portfolio distributions."""
     references = [asset for gallery in portfolio.galleries for asset in gallery.assets]
-    unique_media = _unique_assets(references)
-    unique_assets = [asset for asset in unique_media if _is_photograph(asset)]
-    total = len(unique_assets)
+    unique_media = unique_assets(references)
+    photographs = [asset for asset in unique_media if _is_photograph(asset)]
+    total = len(photographs)
     gallery_sizes = [len(gallery.assets) for gallery in portfolio.galleries]
 
-    captured = [asset.captured_at for asset in unique_assets if asset.captured_at is not None]
+    captured = [asset.captured_at for asset in photographs if asset.captured_at is not None]
     orientations: Counter[str] = Counter()
     formats: Counter[str] = Counter()
     cameras: Counter[str] = Counter()
@@ -68,7 +69,7 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     camera_count = 0
     lens_count = 0
 
-    for asset in unique_assets:
+    for asset in photographs:
         width = _positive_number(asset, "OriginalWidth", "width", "Width")
         height = _positive_number(asset, "OriginalHeight", "height", "Height")
         if width is not None and height is not None:
@@ -126,16 +127,8 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     )
 
 
-def _unique_assets(assets: list[Asset]) -> list[Asset]:
-    unique: dict[str, Asset] = {}
-    for asset in assets:
-        key = _text(asset, "ImageKey") or asset.source_id
-        unique.setdefault(key, asset)
-    return list(unique.values())
-
-
 def _is_photograph(asset: Asset) -> bool:
-    if _value(asset, "IsVideo", "is_video") is True:
+    if asset_value(asset, "IsVideo", "is_video") is True:
         return False
     image_format = _text(asset, "Format", "format")
     return image_format is None or image_format.upper() not in {
@@ -152,20 +145,11 @@ def _is_photograph(asset: Asset) -> bool:
 
 
 def _value(asset: Asset, *names: str) -> Any:
-    for mapping in (asset.exif, asset.metadata):
-        for name in names:
-            value = mapping.get(name)
-            if value is not None:
-                return value
-    return None
+    return asset_value(asset, *names)
 
 
 def _text(asset: Asset, *names: str) -> str | None:
-    value = _value(asset, *names)
-    if isinstance(value, str):
-        stripped = value.strip()
-        return stripped or None
-    return None
+    return text_value(asset, *names)
 
 
 def _number(asset: Asset, *names: str) -> float | None:

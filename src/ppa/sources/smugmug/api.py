@@ -7,7 +7,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
-from ppa.sources.base import SourceError
+from ppa.sources.base import SourceError, SourceRateLimitError
 
 JsonObject = dict[str, Any]
 
@@ -43,7 +43,12 @@ class UrlLibJsonTransport:
             elif error.code == 404:
                 message = "SmugMug could not find the requested portfolio resource."
             elif error.code == 429:
-                message = "SmugMug rate-limited the inspection; try again later."
+                retry_after = error.headers.get("Retry-After")
+                try:
+                    seconds = int(retry_after) if retry_after else None
+                except ValueError:
+                    seconds = None
+                raise SourceRateLimitError(seconds) from error
             else:
                 message = f"SmugMug returned HTTP {error.code}."
             raise SourceError(message) from error

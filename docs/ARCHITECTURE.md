@@ -92,3 +92,29 @@ while producing the same normalized dataset expected by future sources.
 The baseline analyzer operates only on normalized models. It measures dataset shape,
 duplicate gallery placements, metadata coverage, capture range, orientation, formats, and
 available equipment fields. It excludes video records and keeps missing evidence explicit.
+
+## Incremental Enrichment
+
+Source metadata enrichment is separate from initial ingestion. The SmugMug EXIF enricher
+derives public image-metadata URIs from normalized source identifiers and uses API
+multi-get batches. It never requests image bytes.
+
+SQLite schema version 2 adds per-asset enrichment state. Each unique source asset is
+recorded as completed or failed independently of its gallery placements. Successful
+metadata and state updates occur in one transaction, so interruption cannot mark an asset
+complete without saving its metadata. Rate-limited batches remain pending and reruns skip
+completed assets.
+
+This state is operational evidence, not a photographic measurement. Analysis continues to
+read EXIF only through normalized `Asset` models.
+
+## Equipment Analysis
+
+The equipment analyzer operates entirely below the normalized dataset boundary. It
+deduplicates source assets, excludes non-photo media, measures EXIF coverage, and produces
+counts for camera models, lenses, focal lengths, apertures, exposure times, ISO values, and
+capture-year camera usage.
+
+Equipment categories are descriptive ranges with explicit numeric boundaries. Reports use
+available-field counts as distribution denominators and always show coverage against the
+complete unique-photograph count.

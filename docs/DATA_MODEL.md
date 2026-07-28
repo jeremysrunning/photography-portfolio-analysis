@@ -73,3 +73,13 @@ explicit schema version for future migration work.
 SmugMug calls both photographs and videos "images." The source adapter excludes records
 explicitly marked as video. Baseline analysis also detects non-photo formats in previously
 stored datasets, discloses their count, and excludes them from photographic measurements.
+
+## Enrichment State
+
+EXIF is stored as JSON-compatible values on each normalized asset. A separate operational
+record tracks whether public EXIF enrichment for a unique source asset is completed or
+failed, along with attempt count, last error, and update time.
+
+An empty EXIF object can still be a completed enrichment: it means the source returned no
+public metadata. This distinction prevents repeated requests for photographs that simply
+have no available EXIF.
