@@ -69,3 +69,26 @@ Analyzers should not depend on the original portfolio source.
 Reports transform findings into something meaningful for photographers.
 
 The goal is insight, not statistics for their own sake.
+
+## Current Implementation
+
+The reusable engine lives in the `ppa` package and has no user-interface dependency.
+
+- `ppa.models` defines the normalized dataset.
+- `ppa.sources` defines the source contract and contains source-specific adapters.
+- `ppa.storage` defines persistence contracts and a schema-versioned SQLite implementation.
+- `ppa.analysis` contains source-agnostic analyzers, beginning with a metadata baseline.
+- `ppa.reports` renders analyzer results without reaching into source-specific data.
+- `ppa.cli` is a thin adapter over the library.
+
+Portfolio, gallery, and asset identities are scoped by their source. The SQLite store
+persists source URLs and preview references, but never image bytes.
+
+The SmugMug adapter uses the supported public API with an API key and no OAuth. It follows
+the site's user-to-albums-to-album-images links and API pagination. It does not call raw
+image-size endpoints or download previews. This keeps public-site discovery source-specific
+while producing the same normalized dataset expected by future sources.
+
+The baseline analyzer operates only on normalized models. It measures dataset shape,
+duplicate gallery placements, metadata coverage, capture range, orientation, formats, and
+available equipment fields. It excludes video records and keeps missing evidence explicit.

@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+
+# Local environments
+.venv/
+venv/
+
+# Local portfolio datasets
+*.sqlite
+*.sqlite3
+*.db

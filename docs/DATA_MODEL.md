@@ -55,3 +55,21 @@ Observations should always reference supporting evidence.
 A conclusion supported by one or more measurements or observations.
 
 Every finding should include an indication of confidence.
+
+## Initial Representation
+
+The normalized model is implemented as immutable, typed dataclasses.
+
+- Source identities are strings and are interpreted within a source namespace.
+- Flexible metadata and EXIF fields must contain JSON-compatible values.
+- Measurements record a name, value, and optional unit and method.
+- Observations and findings carry explicit evidence references.
+- Finding confidence is a value from `0.0` to `1.0`.
+
+Source and preview URLs are references. They do not imply that image content is retained.
+The initial SQLite representation stores the complete normalized dataset and has an
+explicit schema version for future migration work.
+
+SmugMug calls both photographs and videos "images." The source adapter excludes records
+explicitly marked as video. Baseline analysis also detects non-photo formats in previously
+stored datasets, discloses their count, and excludes them from photographic measurements.

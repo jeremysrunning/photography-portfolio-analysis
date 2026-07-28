@@ -54,6 +54,65 @@ Together they help photographers better understand their own work.
 
 ## Project Status
 
-This project is in its early research and design phase.
+This project is in its early foundation phase. It currently provides:
 
-The initial focus is building a website gallery crawler capable of analyzing publicly accessible photography portfolios without permanently storing original images.
+- source-agnostic normalized portfolio models
+- a generic gallery source contract
+- public SmugMug metadata inspection
+- SQLite persistence for normalized datasets
+- structured JSON logging
+- a small command-line interface
+
+Portfolio analysis and report generation are not implemented yet.
+
+## Development
+
+Python 3.12 or newer is required.
+
+```console
+python -m pip install -e ".[dev]"
+python -m pytest
+python -m ruff check .
+```
+
+Initialize an empty normalized dataset:
+
+```console
+ppa init-db portfolio.sqlite3
+```
+
+Inspect a public SmugMug portfolio and save its normalized metadata:
+
+```powershell
+$env:PPA_SMUGMUG_API_KEY = "your-api-key"
+ppa inspect https://example.smugmug.com --database portfolio.sqlite3
+```
+
+[SmugMug requires an API key](https://api.smugmug.com/api/v2/doc/tutorial/api-key.html)
+for public API requests. OAuth is not required for public data. The key can also be supplied
+with `--api-key`, although the environment variable avoids placing it in shell history.
+
+The command discovers all public albums, follows paginated album-image listings, prints
+gallery and photograph-reference counts, and optionally saves the normalized dataset.
+Password-protected, unlisted, and private content is outside this first slice.
+
+Inspect a saved dataset without contacting SmugMug:
+
+```console
+ppa show portfolio.sqlite3
+```
+
+Generate the source-agnostic metadata baseline:
+
+```console
+ppa report baseline portfolio.sqlite3
+```
+
+The baseline distinguishes gallery placements from unique image identities and reports
+gallery-size distribution, capture range, orientation, file-format distribution, geotag
+coverage, and camera/lens metadata coverage. Non-photo media already present in a dataset
+is disclosed and excluded. Missing metadata is measured rather than interpreted.
+
+The database contains metadata, source references, and derived data only. The current
+storage API has no facility for persisting original image content. SmugMug inspection does
+not call image-size or media-download endpoints.
