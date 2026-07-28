@@ -2,8 +2,72 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
+from urllib.parse import urlsplit
 
 JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+
+
+def _required(value: str, name: str) -> None:
+    if not value.strip():
+        raise ValueError(f"{name} must not be empty")
+
+
+def _url(value: str, name: str) -> None:
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{name} must be an absolute HTTP or HTTPS URL")
+
+
+def _json_value(value: object) -> bool:
+    if value is None or isinstance(value, bool | int | float | str):
+        return True
+    if isinstance(value, list):
+        return all(_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(isinstance(key, str) and _json_value(item) for key, item in value.items())
+    return False
+
+
+def _metadata(value: dict[str, JsonValue], name: str) -> None:
+    if not _json_value(value):
+        raise ValueError(f"{name} must contain only JSON-compatible values")
+
+
+class MediaType(StrEnum):
+    """The explicitly recorded kind of a normalized media asset."""
+
+    PHOTOGRAPH = "photograph"
+    NON_PHOTO = "non_photo"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, slots=True)
+class SourceReference:
+    """Stable provider identity and URL within a portfolio source namespace."""
+
+    source_id: str
+    source_url: str
+
+    def __post_init__(self) -> None:
+        _required(self.source_id, "source_id")
+        _url(self.source_url, "source_url")
+
+
+@dataclass(frozen=True, slots=True)
+class AssetMetadata:
+    """Normalized optional metadata for one unique media asset."""
+
+    media_type: MediaType = MediaType.UNKNOWN
+    captured_at: datetime | None = None
+    values: dict[str, JsonValue] = field(default_factory=dict)
+    exif: dict[str, JsonValue] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.media_type, MediaType):
+            raise ValueError("media_type must be a MediaType")
+        _metadata(self.values, "metadata values")
+        _metadata(self.exif, "EXIF metadata")
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +78,11 @@ class Measurement:
     value: JsonValue
     unit: str | None = None
     method: str | None = None
+
+    def __post_init__(self) -> None:
+        _required(self.name, "measurement name")
+        if not _json_value(self.value):
+            raise ValueError("measurement value must be JSON-compatible")
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,39 +108,135 @@ class Finding:
 
 @dataclass(frozen=True, slots=True)
 class Asset:
-    """A photograph reference and its normalized metadata."""
+    """A unique media asset and its normalized metadata."""
 
-    source_id: str
-    source_url: str
-    gallery_source_id: str
+    source: SourceReference
+    metadata: AssetMetadata = field(default_factory=AssetMetadata)
     preview_url: str | None = None
-    captured_at: datetime | None = None
-    metadata: dict[str, JsonValue] = field(default_factory=dict)
-    exif: dict[str, JsonValue] = field(default_factory=dict)
     measurements: tuple[Measurement, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.preview_url is not None:
+            _url(self.preview_url, "preview_url")
+        names = [measurement.name for measurement in self.measurements]
+        if len(names) != len(set(names)):
+            raise ValueError("asset measurement names must be unique")
+
+    @property
+    def source_id(self) -> str:
+        return self.source.source_id
+
+    @property
+    def source_url(self) -> str:
+        return self.source.source_url
+
+    @property
+    def captured_at(self) -> datetime | None:
+        return self.metadata.captured_at
+
+    @property
+    def media_type(self) -> MediaType:
+        return self.metadata.media_type
+
+    @property
+    def values(self) -> dict[str, JsonValue]:
+        return self.metadata.values
+
+    @property
+    def exif(self) -> dict[str, JsonValue]:
+        return self.metadata.exif
+
+
+@dataclass(frozen=True, slots=True)
+class GalleryPlacement:
+    """The ordered presence of one unique asset in one gallery."""
+
+    asset_source_id: str
+
+    def __post_init__(self) -> None:
+        _required(self.asset_source_id, "placement asset_source_id")
 
 
 @dataclass(frozen=True, slots=True)
 class Gallery:
-    """A logical grouping of assets from a portfolio source."""
+    """A logical grouping of ordered asset placements."""
 
-    source_id: str
+    source: SourceReference
     title: str
-    source_url: str
     parent_source_id: str | None = None
     metadata: dict[str, JsonValue] = field(default_factory=dict)
-    assets: tuple[Asset, ...] = ()
+    placements: tuple[GalleryPlacement, ...] = ()
+
+    def __post_init__(self) -> None:
+        _required(self.title, "gallery title")
+        if self.parent_source_id is not None:
+            _required(self.parent_source_id, "parent_source_id")
+        _metadata(self.metadata, "gallery metadata")
+        identities = [placement.asset_source_id for placement in self.placements]
+        if len(identities) != len(set(identities)):
+            raise ValueError("gallery placements must be unique")
+
+    @property
+    def source_id(self) -> str:
+        return self.source.source_id
+
+    @property
+    def source_url(self) -> str:
+        return self.source.source_url
 
 
 @dataclass(frozen=True, slots=True)
 class Portfolio:
-    """A normalized body of photographic work."""
+    """A normalized body of work with unique assets and gallery placements."""
 
-    source: str
-    source_id: str
+    source_name: str
+    source: SourceReference
     title: str
-    source_url: str
     metadata: dict[str, JsonValue] = field(default_factory=dict)
+    assets: tuple[Asset, ...] = ()
     galleries: tuple[Gallery, ...] = ()
     observations: tuple[Observation, ...] = ()
     findings: tuple[Finding, ...] = ()
+
+    def __post_init__(self) -> None:
+        _required(self.source_name, "source_name")
+        _required(self.title, "portfolio title")
+        _metadata(self.metadata, "portfolio metadata")
+        asset_ids = [asset.source_id for asset in self.assets]
+        if len(asset_ids) != len(set(asset_ids)):
+            raise ValueError("portfolio asset source identities must be unique")
+        gallery_ids = [gallery.source_id for gallery in self.galleries]
+        if len(gallery_ids) != len(set(gallery_ids)):
+            raise ValueError("portfolio gallery source identities must be unique")
+        known_assets = set(asset_ids)
+        for gallery in self.galleries:
+            missing = {
+                placement.asset_source_id
+                for placement in gallery.placements
+                if placement.asset_source_id not in known_assets
+            }
+            if missing:
+                raise ValueError(
+                    f"gallery {gallery.source_id!r} references unknown assets: "
+                    f"{', '.join(sorted(missing))}"
+                )
+
+    @property
+    def source_id(self) -> str:
+        return self.source.source_id
+
+    @property
+    def source_url(self) -> str:
+        return self.source.source_url
+
+    def asset(self, source_id: str) -> Asset:
+        """Return a unique asset by source identity."""
+        for asset in self.assets:
+            if asset.source_id == source_id:
+                return asset
+        raise KeyError(source_id)
+
+    def gallery_assets(self, gallery: Gallery) -> tuple[Asset, ...]:
+        """Resolve one gallery's ordered placements to unique assets."""
+        by_id = {asset.source_id: asset for asset in self.assets}
+        return tuple(by_id[placement.asset_source_id] for placement in gallery.placements)

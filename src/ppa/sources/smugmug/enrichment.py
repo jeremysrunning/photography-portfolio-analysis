@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ppa.models import JsonValue
+from ppa.models import JsonValue, MediaType
 from ppa.sources import SourceError, SourceRateLimitError
 from ppa.sources.smugmug.api import SmugMugApiClient
 from ppa.storage import EnrichmentTarget, PortfolioRepository
@@ -52,7 +52,7 @@ class SmugMugExifEnricher:
         photo_targets: list[EnrichmentTarget] = []
 
         for target in targets:
-            if target.metadata.get("IsVideo") is True:
+            if target.media_type is MediaType.NON_PHOTO:
                 self.repository.save_asset_enrichment(
                     source,
                     portfolio_source_id,
