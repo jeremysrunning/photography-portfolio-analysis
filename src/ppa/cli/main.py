@@ -11,7 +11,7 @@ from ppa.analysis import analyze_baseline, analyze_equipment
 from ppa.core.logging import configure_logging
 from ppa.models import Portfolio
 from ppa.reports import render_baseline, render_equipment
-from ppa.sources import SourceError, SourceRateLimitError
+from ppa.sources import SourceError, SourceRateLimitError, load_portfolio
 from ppa.sources.smugmug import SmugMugApiClient, SmugMugExifEnricher, SmugMugSource
 from ppa.storage.sqlite import SQLitePortfolioRepository
 
@@ -107,7 +107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "inspect requires --api-key or the PPA_SMUGMUG_API_KEY environment variable"
             )
         try:
-            portfolio = SmugMugSource(args.url, args.api_key).load_portfolio()
+            portfolio = load_portfolio(SmugMugSource(args.url, args.api_key))
         except (SourceError, ValueError) as error:
             logger.error("portfolio_inspection_failed", extra={"reason": str(error)})
             return 1

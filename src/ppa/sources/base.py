@@ -74,7 +74,3 @@ class GallerySource(Protocol):
     def open_preview(self, asset: Asset) -> AbstractContextManager[BinaryIO]:
         """Open a temporary binary preview owned and cleaned up by the source."""
         ...
-
-    def load_portfolio(self) -> Portfolio:
-        """Discover and fully enumerate a normalized portfolio."""
-        ...

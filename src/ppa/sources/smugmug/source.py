@@ -103,15 +103,6 @@ class SmugMugSource:
         except (URLError, TimeoutError) as error:
             raise SourceError("Could not open the temporary preview.") from error
 
-    def load_portfolio(self) -> Portfolio:
-        """Discover and fully enumerate the public portfolio."""
-        portfolio = self.discover_portfolio()
-        galleries = tuple(
-            replace(gallery, assets=tuple(self.iter_assets(gallery)))
-            for gallery in self.iter_galleries(portfolio)
-        )
-        return replace(portfolio, galleries=galleries)
-
     def _gallery(self, album: dict[str, Any]) -> Gallery:
         album_id = _resource_id(_required_string(album, "Uri"))
         return Gallery(
