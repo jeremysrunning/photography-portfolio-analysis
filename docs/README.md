@@ -75,6 +75,9 @@ python -m pytest
 python -m ruff check .
 ```
 
+Pull requests targeting `main` run the same tests, lint, and formatting checks in GitHub
+Actions on Python 3.12. The `CI / quality` check must pass before a pull request can merge.
+
 Initialize an empty normalized dataset:
 
 ```console
