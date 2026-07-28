@@ -15,6 +15,18 @@ The format is intentionally simple. This project values documenting the evolutio
 - Guiding principles.
 - Architecture overview.
 - Core data model.
+- Python 3.12 package foundation and command-line interface.
+- Typed normalized portfolio models.
+- Generic gallery source contract.
+- Public SmugMug API inspection with pagination and metadata-only ingestion.
+- CLI inspection summaries with optional SQLite persistence.
+- Saved-dataset `show` command.
+- Source-agnostic baseline metadata analysis and neutral text report.
+- Explicit distinction between media references, unique photographs, gallery placements,
+  and excluded non-photo media.
+- Schema-versioned SQLite normalized dataset storage.
+- Structured JSON logging.
+- Pytest test suite and Ruff configuration.
 
 ### Changed
 

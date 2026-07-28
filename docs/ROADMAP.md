@@ -10,6 +10,25 @@ The goal is to help photographers discover patterns within their own body of wor
 
 Build a source capable of analyzing public photography galleries.
 
+### Foundation status
+
+Completed:
+
+- Python package and CLI foundation
+- normalized portfolio data model
+- gallery source abstraction
+- public SmugMug album and image-reference discovery
+- SQLite storage abstraction and implementation
+- structured logging and automated tests
+- saved-dataset inspection command
+- source-agnostic metadata baseline report
+
+Next:
+
+- define temporary preview-fetching behavior before visual analysis is added
+- ingest public EXIF metadata for equipment and exposure analysis
+- add focused equipment and temporal analyzers
+
 ### Goals
 
 - Crawl gallery structure
