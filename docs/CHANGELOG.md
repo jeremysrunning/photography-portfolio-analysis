@@ -36,7 +36,8 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Changed
 
-- Nothing yet.
+- Expanded the `GallerySource` contract to cover discovery, gallery and asset enumeration,
+  metadata enrichment, normalized failures, and source-owned temporary preview access.
 
 ### Fixed
 
