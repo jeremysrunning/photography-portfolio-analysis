@@ -154,3 +154,7 @@ Timestamp calendar fields are not converted or assigned a location. Hour distrib
 remain separated into UTC, explicit UTC offsets, and timezone-unknown values so the
 analyzer never presents UTC as inferred local time. Counts describe available metadata
 and do not measure productivity or infer intent.
+
+The default text report summarizes deterministic timeline measurements, the five most
+represented recorded camera models, and the ten largest galleries. Complete global,
+camera, and gallery distributions remain available through independent CLI detail flags.
