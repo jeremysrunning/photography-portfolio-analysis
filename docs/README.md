@@ -56,7 +56,7 @@ Together they help photographers better understand their own work.
 
 This project is in its early foundation phase. It currently provides:
 
-- source-agnostic normalized portfolio models
+- source-agnostic normalized portfolio, unique-asset, and gallery-placement models
 - a generic gallery source contract
 - public SmugMug metadata inspection
 - SQLite persistence for normalized datasets
@@ -96,7 +96,7 @@ for public API requests. OAuth is not required for public data. The key can also
 with `--api-key`, although the environment variable avoids placing it in shell history.
 
 The command discovers all public albums, follows paginated album-image listings, prints
-gallery and photograph-reference counts, and optionally saves the normalized dataset.
+gallery and media-reference counts, and optionally saves the normalized dataset.
 Password-protected, unlisted, and private content is outside this first slice.
 
 SQLite stores normalized portfolio, gallery, unique-asset, and gallery-placement records.
@@ -110,10 +110,14 @@ galleries, assets, and placements that are absent. Automatic deletion synchroniz
 not performed. Existing EXIF and derived measurements are retained when a later crawl has
 no replacement enrichment data.
 
-The database carries an explicit schema version. This release creates version 3 and
-migrates version-2 databases in place; unsupported versions fail with a clear error rather
-than being overwritten. SQLite foreign keys and transactions protect relationships and
-roll back an incomplete save.
+Media assets have an explicit `photograph`, `non_photo`, or `unknown` type. Unknown media
+is not treated as photography, and SmugMug video records remain represented without being
+included in photographic analysis.
+
+The database carries an explicit schema version. This release creates version 4 and
+migrates version-2 and version-3 databases in place; unsupported versions fail with a clear
+error rather than being overwritten. SQLite foreign keys and transactions protect
+relationships and roll back an incomplete save.
 
 Inspect a saved dataset without contacting SmugMug:
 
