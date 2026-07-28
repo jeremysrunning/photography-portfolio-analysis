@@ -88,7 +88,7 @@ def test_default_report_is_concise_neutral_and_measurement_driven() -> None:
         "Evidence",
         "Timeline Summary",
         "Key Measurements",
-        "Camera Eras",
+        "Recorded Camera Use",
         "Top Galleries",
         "Notes",
     ]

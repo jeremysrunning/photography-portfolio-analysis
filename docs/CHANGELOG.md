@@ -43,7 +43,8 @@ The format is intentionally simple. This project values documenting the evolutio
 - Moved normalized portfolio composition from source adapters into a shared,
   provider-agnostic loader.
 - Made the default timeline report concise, with deterministic summary measurements,
-  five recorded camera eras, ten top galleries, and optional exhaustive detail sections.
+  five recorded camera-use summaries, ten top galleries, and optional exhaustive detail
+  sections.
 
 ### Fixed
 

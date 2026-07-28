@@ -45,7 +45,7 @@ def render_timeline(
             f"  Longest gap between recorded captures: {_gap(report)}",
             (f"  Most frequently recorded UTC capture hour: {_utc_hour(report)}"),
             "",
-            "Camera Eras",
+            "Recorded Camera Use",
         ]
     )
     _add_camera_eras(lines, report)
@@ -75,7 +75,7 @@ def render_timeline(
                 "  Comparable capture ranges and gaps are unavailable when timestamp "
                 "timezone bases are mixed."
             ),
-            "  Camera Eras lists the five most represented recorded camera models.",
+            "  Recorded Camera Use lists the five most represented camera models.",
             "  Camera dates describe recorded use in this portfolio, not ownership.",
             "  Counts describe recorded capture metadata, not productivity or intent.",
             (
