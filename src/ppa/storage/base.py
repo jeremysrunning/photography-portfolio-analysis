@@ -39,6 +39,10 @@ class PortfolioRepository(Protocol):
         """Retrieve a normalized portfolio by source-scoped identity."""
         ...
 
+    def exists(self, source: str, source_id: str) -> bool:
+        """Return whether a source-scoped portfolio is present."""
+        ...
+
     def list_keys(self) -> tuple[tuple[str, str], ...]:
         """List source-scoped portfolio identities in the datastore."""
         ...
@@ -84,4 +88,8 @@ class PortfolioRepository(Protocol):
         kind: str,
     ) -> EnrichmentStatus:
         """Return pending, completed, and failed unique-asset counts."""
+        ...
+
+    def close(self) -> None:
+        """Close datastore resources cleanly."""
         ...

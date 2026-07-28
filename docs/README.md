@@ -99,6 +99,22 @@ The command discovers all public albums, follows paginated album-image listings,
 gallery and photograph-reference counts, and optionally saves the normalized dataset.
 Password-protected, unlisted, and private content is outside this first slice.
 
+SQLite stores normalized portfolio, gallery, unique-asset, and gallery-placement records.
+Saving the same crawl again updates matching source-scoped identities without creating
+duplicates. Assets encountered in more than one gallery are stored once and linked to
+each gallery through placements. The first occurrence in normalized gallery order supplies
+the canonical asset metadata, matching analyzer deduplication behavior.
+
+Later saves update records present in the crawl but conservatively retain previously seen
+galleries, assets, and placements that are absent. Automatic deletion synchronization is
+not performed. Existing EXIF and derived measurements are retained when a later crawl has
+no replacement enrichment data.
+
+The database carries an explicit schema version. This release creates version 3 and
+migrates version-2 databases in place; unsupported versions fail with a clear error rather
+than being overwritten. SQLite foreign keys and transactions protect relationships and
+roll back an incomplete save.
+
 Inspect a saved dataset without contacting SmugMug:
 
 ```console

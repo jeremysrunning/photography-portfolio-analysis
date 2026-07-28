@@ -11,66 +11,104 @@ from typing import Any
 from ppa.models import Asset, Finding, Gallery, JsonValue, Measurement, Observation, Portfolio
 from ppa.storage.base import EnrichmentStatus, EnrichmentTarget
 
-SCHEMA_VERSION = 2
-_SCHEMA = """
-PRAGMA foreign_keys = ON;
-CREATE TABLE IF NOT EXISTS schema_metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS portfolios (
-    source TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    source_url TEXT NOT NULL,
-    metadata_json TEXT NOT NULL,
-    observations_json TEXT NOT NULL,
-    findings_json TEXT NOT NULL,
-    PRIMARY KEY (source, source_id)
-);
-CREATE TABLE IF NOT EXISTS galleries (
-    source TEXT NOT NULL,
-    portfolio_source_id TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    title TEXT NOT NULL,
-    source_url TEXT NOT NULL,
-    parent_source_id TEXT,
-    metadata_json TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    PRIMARY KEY (source, portfolio_source_id, source_id),
-    FOREIGN KEY (source, portfolio_source_id)
-        REFERENCES portfolios(source, source_id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS assets (
-    source TEXT NOT NULL,
-    portfolio_source_id TEXT NOT NULL,
-    gallery_source_id TEXT NOT NULL,
-    source_id TEXT NOT NULL,
-    source_url TEXT NOT NULL,
-    preview_url TEXT,
-    captured_at TEXT,
-    metadata_json TEXT NOT NULL,
-    exif_json TEXT NOT NULL,
-    measurements_json TEXT NOT NULL,
-    position INTEGER NOT NULL,
-    PRIMARY KEY (source, portfolio_source_id, gallery_source_id, source_id),
-    FOREIGN KEY (source, portfolio_source_id, gallery_source_id)
-        REFERENCES galleries(source, portfolio_source_id, source_id) ON DELETE CASCADE
-);
-CREATE TABLE IF NOT EXISTS asset_enrichments (
-    source TEXT NOT NULL,
-    portfolio_source_id TEXT NOT NULL,
-    asset_source_id TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
-    attempts INTEGER NOT NULL,
-    last_error TEXT,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (source, portfolio_source_id, asset_source_id, kind),
-    FOREIGN KEY (source, portfolio_source_id)
-        REFERENCES portfolios(source, source_id) ON DELETE CASCADE
-);
-"""
+SCHEMA_VERSION = 3
+
+_SCHEMA_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS schema_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS portfolios (
+        source TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        metadata_json TEXT NOT NULL,
+        observations_json TEXT NOT NULL,
+        findings_json TEXT NOT NULL,
+        PRIMARY KEY (source, source_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS galleries (
+        source TEXT NOT NULL,
+        portfolio_source_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        parent_source_id TEXT,
+        metadata_json TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (source, portfolio_source_id, source_id),
+        FOREIGN KEY (source, portfolio_source_id)
+            REFERENCES portfolios(source, source_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS assets (
+        source TEXT NOT NULL,
+        portfolio_source_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        source_url TEXT NOT NULL,
+        preview_url TEXT,
+        captured_at TEXT,
+        metadata_json TEXT NOT NULL,
+        exif_json TEXT NOT NULL,
+        measurements_json TEXT NOT NULL,
+        PRIMARY KEY (source, portfolio_source_id, source_id),
+        FOREIGN KEY (source, portfolio_source_id)
+            REFERENCES portfolios(source, source_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_placements (
+        source TEXT NOT NULL,
+        portfolio_source_id TEXT NOT NULL,
+        gallery_source_id TEXT NOT NULL,
+        asset_source_id TEXT NOT NULL,
+        position INTEGER NOT NULL,
+        PRIMARY KEY (
+            source, portfolio_source_id, gallery_source_id, asset_source_id
+        ),
+        FOREIGN KEY (source, portfolio_source_id, gallery_source_id)
+            REFERENCES galleries(source, portfolio_source_id, source_id) ON DELETE CASCADE,
+        FOREIGN KEY (source, portfolio_source_id, asset_source_id)
+            REFERENCES assets(source, portfolio_source_id, source_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS asset_enrichments (
+        source TEXT NOT NULL,
+        portfolio_source_id TEXT NOT NULL,
+        asset_source_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+        attempts INTEGER NOT NULL,
+        last_error TEXT,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (source, portfolio_source_id, asset_source_id, kind),
+        FOREIGN KEY (source, portfolio_source_id, asset_source_id)
+            REFERENCES assets(source, portfolio_source_id, source_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_galleries_portfolio_position
+        ON galleries(source, portfolio_source_id, position)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_placements_gallery_position
+        ON gallery_placements(
+            source, portfolio_source_id, gallery_source_id, position
+        )
+    """,
+)
+
+
+class UnsupportedSchemaVersionError(RuntimeError):
+    """Raised when a database schema cannot be read or migrated safely."""
 
 
 class SQLitePortfolioRepository:
@@ -103,33 +141,51 @@ class SQLitePortfolioRepository:
             yield connection
 
     def close(self) -> None:
+        """Close the SQLite connection if one is open."""
         if self._connection is not None:
             self._connection.close()
             self._connection = None
             self._initialized = False
 
     def initialize(self) -> None:
+        """Create or migrate the schema and reject unsupported versions."""
         if self._initialized:
             return
-        with self._transaction() as connection:
-            connection.executescript(_SCHEMA)
-            connection.execute(
-                "INSERT OR REPLACE INTO schema_metadata (key, value) VALUES ('version', ?)",
-                (str(SCHEMA_VERSION),),
+        connection = self._connect()
+        current_version = self._schema_version(connection)
+        if current_version is None:
+            with self._transaction() as transaction:
+                self._create_schema(transaction)
+                transaction.execute(
+                    "INSERT INTO schema_metadata (key, value) VALUES ('version', ?)",
+                    (str(SCHEMA_VERSION),),
+                )
+        elif current_version == 2:
+            self._migrate_v2_to_v3(connection)
+        elif current_version != SCHEMA_VERSION:
+            raise UnsupportedSchemaVersionError(
+                f"Unsupported SQLite schema version {current_version}; "
+                f"this release supports version {SCHEMA_VERSION}."
             )
         self._initialized = True
 
     def save(self, portfolio: Portfolio) -> None:
+        """Upsert a normalized portfolio without deleting previously seen records."""
         self.initialize()
         with self._transaction() as connection:
             key = (portfolio.source, portfolio.source_id)
             connection.execute(
-                "DELETE FROM portfolios WHERE source = ? AND source_id = ?",
-                key,
-            )
-            connection.execute(
                 """
-                INSERT INTO portfolios VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO portfolios (
+                    source, source_id, title, source_url, metadata_json,
+                    observations_json, findings_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (source, source_id) DO UPDATE SET
+                    title = excluded.title,
+                    source_url = excluded.source_url,
+                    metadata_json = excluded.metadata_json,
+                    observations_json = excluded.observations_json,
+                    findings_json = excluded.findings_json
                 """,
                 (
                     *key,
@@ -154,49 +210,29 @@ class SQLitePortfolioRepository:
                     ),
                 ),
             )
+            canonical_assets: dict[str, Asset] = {}
+            placements: list[tuple[str, str, int]] = []
             for gallery_position, gallery in enumerate(portfolio.galleries):
-                connection.execute(
-                    "INSERT INTO galleries VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        *key,
-                        gallery.source_id,
-                        gallery.title,
-                        gallery.source_url,
-                        gallery.parent_source_id,
-                        _json(gallery.metadata),
-                        gallery_position,
-                    ),
-                )
+                self._upsert_gallery(connection, key, gallery, gallery_position)
                 for asset_position, asset in enumerate(gallery.assets):
                     if asset.gallery_source_id != gallery.source_id:
                         raise ValueError("asset gallery_source_id does not match its gallery")
-                    connection.execute(
-                        "INSERT INTO assets VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            *key,
-                            gallery.source_id,
-                            asset.source_id,
-                            asset.source_url,
-                            asset.preview_url,
-                            asset.captured_at.isoformat() if asset.captured_at else None,
-                            _json(asset.metadata),
-                            _json(asset.exif),
-                            _json(
-                                [
-                                    {
-                                        "name": item.name,
-                                        "value": item.value,
-                                        "unit": item.unit,
-                                        "method": item.method,
-                                    }
-                                    for item in asset.measurements
-                                ]
-                            ),
-                            asset_position,
-                        ),
-                    )
+                    canonical_assets.setdefault(asset.source_id, asset)
+                    placements.append((gallery.source_id, asset.source_id, asset_position))
+            for asset in canonical_assets.values():
+                self._upsert_asset(connection, key, asset)
+            for gallery_source_id, asset_source_id, position in placements:
+                self._upsert_placement(
+                    connection,
+                    key,
+                    gallery_source_id,
+                    asset_source_id,
+                    position,
+                )
 
     def get(self, source: str, source_id: str) -> Portfolio | None:
+        """Load a complete normalized portfolio by source-scoped identity."""
+        self.initialize()
         connection = self._connect()
         row = connection.execute(
             "SELECT * FROM portfolios WHERE source = ? AND source_id = ?",
@@ -208,7 +244,7 @@ class SQLitePortfolioRepository:
             """
             SELECT * FROM galleries
             WHERE source = ? AND portfolio_source_id = ?
-            ORDER BY position
+            ORDER BY position, source_id
             """,
             (source, source_id),
         ).fetchall()
@@ -233,6 +269,22 @@ class SQLitePortfolioRepository:
             observations=observations,
             findings=findings,
         )
+
+    def exists(self, source: str, source_id: str) -> bool:
+        """Return whether a source-scoped portfolio is stored."""
+        self.initialize()
+        row = (
+            self._connect()
+            .execute(
+                """
+            SELECT 1 FROM portfolios
+            WHERE source = ? AND source_id = ?
+            """,
+                (source, source_id),
+            )
+            .fetchone()
+        )
+        return row is not None
 
     def list_keys(self) -> tuple[tuple[str, str], ...]:
         self.initialize()
@@ -263,7 +315,7 @@ class SQLitePortfolioRepository:
             parameters.append(limit)
         rows = self._connect().execute(
             f"""
-            SELECT assets.source_id, MIN(assets.metadata_json) AS metadata_json
+            SELECT assets.source_id, assets.metadata_json
             FROM assets
             LEFT JOIN asset_enrichments AS enrichment
               ON enrichment.source = assets.source
@@ -273,7 +325,6 @@ class SQLitePortfolioRepository:
             WHERE assets.source = ?
               AND assets.portfolio_source_id = ?
               AND {status_clause}
-            GROUP BY assets.source_id
             ORDER BY assets.source_id
             {limit_clause}
             """,
@@ -346,23 +397,19 @@ class SQLitePortfolioRepository:
             self._connect()
             .execute(
                 """
-            WITH unique_assets AS (
-                SELECT DISTINCT source_id
+                SELECT
+                    SUM(CASE WHEN enrichment.status IS NULL THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE WHEN enrichment.status = 'completed' THEN 1 ELSE 0 END) AS completed,
+                    SUM(CASE WHEN enrichment.status = 'failed' THEN 1 ELSE 0 END) AS failed
                 FROM assets
-                WHERE source = ? AND portfolio_source_id = ?
-            )
-            SELECT
-                SUM(CASE WHEN enrichment.status IS NULL THEN 1 ELSE 0 END) AS pending,
-                SUM(CASE WHEN enrichment.status = 'completed' THEN 1 ELSE 0 END) AS completed,
-                SUM(CASE WHEN enrichment.status = 'failed' THEN 1 ELSE 0 END) AS failed
-            FROM unique_assets
-            LEFT JOIN asset_enrichments AS enrichment
-              ON enrichment.source = ?
-             AND enrichment.portfolio_source_id = ?
-             AND enrichment.asset_source_id = unique_assets.source_id
-             AND enrichment.kind = ?
-            """,
-                (source, portfolio_source_id, source, portfolio_source_id, kind),
+                LEFT JOIN asset_enrichments AS enrichment
+                  ON enrichment.source = assets.source
+                 AND enrichment.portfolio_source_id = assets.portfolio_source_id
+                 AND enrichment.asset_source_id = assets.source_id
+                 AND enrichment.kind = ?
+                WHERE assets.source = ? AND assets.portfolio_source_id = ?
+                """,
+                (kind, source, portfolio_source_id),
             )
             .fetchone()
         )
@@ -370,6 +417,106 @@ class SQLitePortfolioRepository:
             pending=int(row["pending"] or 0),
             completed=int(row["completed"] or 0),
             failed=int(row["failed"] or 0),
+        )
+
+    @staticmethod
+    def _upsert_gallery(
+        connection: sqlite3.Connection,
+        key: tuple[str, str],
+        gallery: Gallery,
+        position: int,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO galleries (
+                source, portfolio_source_id, source_id, title, source_url,
+                parent_source_id, metadata_json, position
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (source, portfolio_source_id, source_id) DO UPDATE SET
+                title = excluded.title,
+                source_url = excluded.source_url,
+                parent_source_id = excluded.parent_source_id,
+                metadata_json = excluded.metadata_json,
+                position = excluded.position
+            """,
+            (
+                *key,
+                gallery.source_id,
+                gallery.title,
+                gallery.source_url,
+                gallery.parent_source_id,
+                _json(gallery.metadata),
+                position,
+            ),
+        )
+
+    @staticmethod
+    def _upsert_asset(
+        connection: sqlite3.Connection,
+        key: tuple[str, str],
+        asset: Asset,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO assets (
+                source, portfolio_source_id, source_id, source_url, preview_url,
+                captured_at, metadata_json, exif_json, measurements_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (source, portfolio_source_id, source_id) DO UPDATE SET
+                source_url = excluded.source_url,
+                preview_url = excluded.preview_url,
+                captured_at = excluded.captured_at,
+                metadata_json = excluded.metadata_json,
+                exif_json = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.exif_json
+                    ELSE excluded.exif_json
+                END,
+                measurements_json = CASE
+                    WHEN excluded.measurements_json = '[]' THEN assets.measurements_json
+                    ELSE excluded.measurements_json
+                END
+            """,
+            (
+                *key,
+                asset.source_id,
+                asset.source_url,
+                asset.preview_url,
+                asset.captured_at.isoformat() if asset.captured_at else None,
+                _json(asset.metadata),
+                _json(asset.exif),
+                _json(
+                    [
+                        {
+                            "name": item.name,
+                            "value": item.value,
+                            "unit": item.unit,
+                            "method": item.method,
+                        }
+                        for item in asset.measurements
+                    ]
+                ),
+            ),
+        )
+
+    @staticmethod
+    def _upsert_placement(
+        connection: sqlite3.Connection,
+        key: tuple[str, str],
+        gallery_source_id: str,
+        asset_source_id: str,
+        position: int,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO gallery_placements (
+                source, portfolio_source_id, gallery_source_id,
+                asset_source_id, position
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (
+                source, portfolio_source_id, gallery_source_id, asset_source_id
+            ) DO UPDATE SET position = excluded.position
+            """,
+            (*key, gallery_source_id, asset_source_id, position),
         )
 
     @staticmethod
@@ -415,9 +562,16 @@ class SQLitePortfolioRepository:
     ) -> Gallery:
         asset_rows = connection.execute(
             """
-            SELECT * FROM assets
-            WHERE source = ? AND portfolio_source_id = ? AND gallery_source_id = ?
-            ORDER BY position
+            SELECT assets.*, placements.position AS placement_position
+            FROM gallery_placements AS placements
+            JOIN assets
+              ON assets.source = placements.source
+             AND assets.portfolio_source_id = placements.portfolio_source_id
+             AND assets.source_id = placements.asset_source_id
+            WHERE placements.source = ?
+              AND placements.portfolio_source_id = ?
+              AND placements.gallery_source_id = ?
+            ORDER BY placements.position, assets.source_id
             """,
             (source, portfolio_source_id, row["source_id"]),
         ).fetchall()
@@ -425,7 +579,7 @@ class SQLitePortfolioRepository:
             Asset(
                 source_id=item["source_id"],
                 source_url=item["source_url"],
-                gallery_source_id=item["gallery_source_id"],
+                gallery_source_id=row["source_id"],
                 preview_url=item["preview_url"],
                 captured_at=(
                     datetime.fromisoformat(item["captured_at"]) if item["captured_at"] else None
@@ -452,6 +606,106 @@ class SQLitePortfolioRepository:
             metadata=json.loads(row["metadata_json"]),
             assets=assets,
         )
+
+    @staticmethod
+    def _schema_version(connection: sqlite3.Connection) -> int | None:
+        table = connection.execute(
+            """
+            SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'schema_metadata'
+            """
+        ).fetchone()
+        if table is None:
+            return None
+        row = connection.execute(
+            "SELECT value FROM schema_metadata WHERE key = 'version'"
+        ).fetchone()
+        if row is None:
+            raise UnsupportedSchemaVersionError(
+                "SQLite schema metadata does not contain a version."
+            )
+        try:
+            return int(row["value"])
+        except (TypeError, ValueError) as error:
+            raise UnsupportedSchemaVersionError(
+                f"SQLite schema version is invalid: {row['value']!r}."
+            ) from error
+
+    @staticmethod
+    def _create_schema(connection: sqlite3.Connection) -> None:
+        for statement in _SCHEMA_STATEMENTS:
+            connection.execute(statement)
+
+    def _migrate_v2_to_v3(self, connection: sqlite3.Connection) -> None:
+        with connection:
+            connection.execute("ALTER TABLE assets RENAME TO assets_v2")
+            connection.execute("ALTER TABLE asset_enrichments RENAME TO asset_enrichments_v2")
+            self._create_schema(connection)
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO assets (
+                    source, portfolio_source_id, source_id, source_url,
+                    preview_url, captured_at, metadata_json, exif_json,
+                    measurements_json
+                )
+                SELECT
+                    legacy.source,
+                    legacy.portfolio_source_id,
+                    legacy.source_id,
+                    legacy.source_url,
+                    legacy.preview_url,
+                    legacy.captured_at,
+                    legacy.metadata_json,
+                    legacy.exif_json,
+                    legacy.measurements_json
+                FROM assets_v2 AS legacy
+                JOIN galleries
+                  ON galleries.source = legacy.source
+                 AND galleries.portfolio_source_id = legacy.portfolio_source_id
+                 AND galleries.source_id = legacy.gallery_source_id
+                ORDER BY galleries.position, legacy.position, legacy.source_id
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO gallery_placements (
+                    source, portfolio_source_id, gallery_source_id,
+                    asset_source_id, position
+                )
+                SELECT
+                    source, portfolio_source_id, gallery_source_id,
+                    source_id, position
+                FROM assets_v2
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO asset_enrichments (
+                    source, portfolio_source_id, asset_source_id, kind,
+                    status, attempts, last_error, updated_at
+                )
+                SELECT
+                    legacy.source,
+                    legacy.portfolio_source_id,
+                    legacy.asset_source_id,
+                    legacy.kind,
+                    legacy.status,
+                    legacy.attempts,
+                    legacy.last_error,
+                    legacy.updated_at
+                FROM asset_enrichments_v2 AS legacy
+                JOIN assets
+                  ON assets.source = legacy.source
+                 AND assets.portfolio_source_id = legacy.portfolio_source_id
+                 AND assets.source_id = legacy.asset_source_id
+                """
+            )
+            connection.execute("DROP TABLE asset_enrichments_v2")
+            connection.execute("DROP TABLE assets_v2")
+            connection.execute(
+                "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
+                (str(SCHEMA_VERSION),),
+            )
 
 
 def _json(value: Any) -> str:
