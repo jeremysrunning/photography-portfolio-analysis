@@ -142,3 +142,15 @@ capture-year camera usage.
 Equipment categories are descriptive ranges with explicit numeric boundaries. Reports use
 available-field counts as distribution denominators and always show coverage against the
 complete unique-photograph count.
+
+## Timeline Analysis
+
+The timeline analyzer operates only on normalized capture timestamps and camera metadata.
+It measures yearly and year-month capture counts, recorded clock hours, and the same
+distributions segmented by camera and gallery. Each result includes its photograph sample
+size and capture-timestamp coverage.
+
+Timestamp calendar fields are not converted or assigned a location. Hour distributions
+remain separated into UTC, explicit UTC offsets, and timezone-unknown values so the
+analyzer never presents UTC as inferred local time. Counts describe available metadata
+and do not measure productivity or infer intent.

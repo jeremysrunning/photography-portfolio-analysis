@@ -24,11 +24,12 @@ Completed:
 - source-agnostic metadata baseline report
 - resumable, batched public EXIF enrichment
 - source-agnostic equipment and exposure report
+- source-agnostic timeline habits report
 
 Next:
 
 - define temporary preview-fetching behavior before visual analysis is added
-- add focused temporal analyzers
+- add further focused temporal analyzers
 
 ### Goals
 
