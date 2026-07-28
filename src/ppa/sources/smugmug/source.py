@@ -1,12 +1,20 @@
 """Public SmugMug portfolio source."""
 
-from dataclasses import dataclass
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any
+from typing import Any, BinaryIO
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
+from urllib.request import Request, urlopen
 
 from ppa.models import Asset, Gallery, Portfolio
-from ppa.sources.base import SourceError
+from ppa.sources.base import (
+    SourceAuthenticationError,
+    SourceError,
+    SourcePreviewUnavailableError,
+)
 from ppa.sources.smugmug.api import SmugMugApiClient
 
 
@@ -22,16 +30,12 @@ class SmugMugSource:
     def source_name(self) -> str:
         return "smugmug"
 
-    def load_portfolio(self) -> Portfolio:
+    def discover_portfolio(self) -> Portfolio:
+        """Discover the public SmugMug account without enumerating galleries."""
         client = self.client or SmugMugApiClient(self.portfolio_url, self.api_key)
         site_user = client.get_response("/api/v2!siteuser")
         user = _object(site_user, "User")
         nickname = _required_string(user, "NickName")
-        albums_uri = _linked_uri(user, "UserAlbums")
-
-        galleries = tuple(
-            self._load_gallery(client, album) for album in client.iter_objects(albums_uri, "Album")
-        )
         return Portfolio(
             source=self.source_name,
             source_id=nickname,
@@ -40,21 +44,76 @@ class SmugMugSource:
                 _string(user, "WebUri") or self.portfolio_url, self.portfolio_url
             ),
             metadata=_metadata(user, {"Name", "NickName", "Uri", "Uris", "WebUri"}),
-            galleries=galleries,
         )
 
-    def _load_gallery(
-        self,
-        client: SmugMugApiClient,
-        album: dict[str, Any],
-    ) -> Gallery:
-        album_id = _resource_id(_required_string(album, "Uri"))
-        images_uri = _linked_uri(album, "AlbumImages")
-        assets = tuple(
-            _asset(image, album_id, self.portfolio_url)
-            for image in client.iter_objects(images_uri, "AlbumImage")
-            if image.get("IsVideo") is not True
+    def iter_galleries(self, portfolio: Portfolio) -> Iterator[Gallery]:
+        """Yield public SmugMug albums as normalized galleries."""
+        if portfolio.source != self.source_name:
+            raise SourceError(
+                f"Cannot enumerate {portfolio.source!r} with the {self.source_name!r} source."
+            )
+        client = self.client or SmugMugApiClient(self.portfolio_url, self.api_key)
+        albums_uri = f"/api/v2/user/{portfolio.source_id}!albums"
+        for album in client.iter_objects(albums_uri, "Album"):
+            yield self._gallery(album)
+
+    def iter_assets(self, gallery: Gallery) -> Iterator[Asset]:
+        """Yield public photographs in a normalized gallery."""
+        client = self.client or SmugMugApiClient(self.portfolio_url, self.api_key)
+        images_uri = f"/api/v2/album/{gallery.source_id}!images"
+        for image in client.iter_objects(images_uri, "AlbumImage"):
+            if image.get("IsVideo") is not True:
+                yield _asset(image, gallery.source_id, self.portfolio_url)
+
+    def enrich_asset_metadata(self, asset: Asset) -> Asset:
+        """Return an asset enriched with available public SmugMug metadata."""
+        client = self.client or SmugMugApiClient(self.portfolio_url, self.api_key)
+        response = client.get_response(f"/api/v2/image/{asset.source_id}!metadata")
+        metadata = _object(response, "ImageMetadata")
+        exif = _available_metadata(
+            metadata,
+            {"Uri", "Uris", "ResponseLevel", "UriDescription"},
         )
+        return replace(asset, exif={**asset.exif, **exif})
+
+    @contextmanager
+    def open_preview(self, asset: Asset) -> Iterator[BinaryIO]:
+        """Open a source-owned preview stream and close it on context exit."""
+        if not asset.preview_url:
+            raise SourcePreviewUnavailableError(
+                f"Asset {asset.source_id!r} has no public preview URL."
+            )
+        request = Request(
+            asset.preview_url,
+            headers={"User-Agent": "photography-portfolio-analysis/0.1"},
+        )
+        try:
+            with urlopen(request, timeout=30.0) as response:
+                yield response
+        except HTTPError as error:
+            if error.code in {401, 403}:
+                raise SourceAuthenticationError(
+                    "The source rejected access to the temporary preview."
+                ) from error
+            if error.code == 404:
+                raise SourcePreviewUnavailableError(
+                    f"Asset {asset.source_id!r} preview was not found."
+                ) from error
+            raise SourceError(f"Preview request returned HTTP {error.code}.") from error
+        except (URLError, TimeoutError) as error:
+            raise SourceError("Could not open the temporary preview.") from error
+
+    def load_portfolio(self) -> Portfolio:
+        """Discover and fully enumerate the public portfolio."""
+        portfolio = self.discover_portfolio()
+        galleries = tuple(
+            replace(gallery, assets=tuple(self.iter_assets(gallery)))
+            for gallery in self.iter_galleries(portfolio)
+        )
+        return replace(portfolio, galleries=galleries)
+
+    def _gallery(self, album: dict[str, Any]) -> Gallery:
+        album_id = _resource_id(_required_string(album, "Uri"))
         return Gallery(
             source_id=album_id,
             title=_string(album, "Name") or album_id,
@@ -63,7 +122,6 @@ class SmugMugSource:
                 album,
                 {"Name", "Uri", "Uris", "WebUri"},
             ),
-            assets=assets,
         )
 
 
@@ -140,6 +198,14 @@ def _datetime(value: Any) -> datetime | None:
 def _metadata(value: dict[str, Any], excluded: set[str]) -> dict[str, Any]:
     return {
         key: item for key, item in value.items() if key not in excluded and _is_json_value(item)
+    }
+
+
+def _available_metadata(value: dict[str, Any], excluded: set[str]) -> dict[str, Any]:
+    return {
+        key: item
+        for key, item in _metadata(value, excluded).items()
+        if item not in (None, "", [], {})
     }
 
 
