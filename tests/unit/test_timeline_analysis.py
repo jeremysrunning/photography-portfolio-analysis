@@ -99,6 +99,7 @@ def test_default_report_is_concise_neutral_and_measurement_driven() -> None:
     assert "Camera Breakdown" not in rendered
     assert "Gallery Breakdown" not in rendered
     assert "Most active capture year: 2021: 4" in rendered
+    assert "Recorded capture timespan: 1,188 days (3.3 years)" in rendered
     assert "Largest recorded year-over-year decrease: 2021 to 2022: -3" in rendered
     assert "Camera dates describe recorded use in this portfolio, not ownership." in rendered
     lowered = rendered.casefold()

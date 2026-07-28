@@ -23,7 +23,7 @@ def render_timeline(
             f"  Latest recorded capture: {_timestamp(report.latest_capture)}",
             "",
             "Timeline Summary",
-            f"  Recorded capture timespan: {_duration(report.timespan)}",
+            f"  Recorded capture timespan: {_timespan(report.timespan)}",
             f"  Most active capture year: {_period(report.peak_year)}",
             f"  Most active capture month: {_period(report.peak_month)}",
             (f"  Least active complete year: {_period(report.least_active_complete_year)}"),
@@ -99,6 +99,13 @@ def _duration(value: timedelta | None) -> str:
     if value is None:
         return "not available"
     return f"{value.days:,} days"
+
+
+def _timespan(value: timedelta | None) -> str:
+    if value is None:
+        return "not available"
+    approximate_years = value.total_seconds() / (365.2425 * 24 * 60 * 60)
+    return f"{value.days:,} days ({approximate_years:.1f} years)"
 
 
 def _period(value: PeriodCount | None) -> str:
