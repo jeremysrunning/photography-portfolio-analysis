@@ -113,6 +113,10 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
     equipment_output = capsys.readouterr().out
     assert "Equipment report: Example Portfolio" in equipment_output
 
+    assert main(["report", "timeline", str(database)]) == 0
+    timeline_output = capsys.readouterr().out
+    assert "Timeline report: Example Portfolio" in timeline_output
+
 
 def test_enrich_exif_updates_saved_asset(monkeypatch, tmp_path, capsys) -> None:
     database = tmp_path / "portfolio.sqlite3"

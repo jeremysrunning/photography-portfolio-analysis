@@ -7,10 +7,10 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ppa import __version__
-from ppa.analysis import analyze_baseline, analyze_equipment
+from ppa.analysis import analyze_baseline, analyze_equipment, analyze_timeline
 from ppa.core.logging import configure_logging
 from ppa.models import Portfolio
-from ppa.reports import render_baseline, render_equipment
+from ppa.reports import render_baseline, render_equipment, render_timeline
 from ppa.sources import SourceError, SourceRateLimitError, load_portfolio
 from ppa.sources.smugmug import SmugMugApiClient, SmugMugExifEnricher, SmugMugSource
 from ppa.storage.sqlite import SQLitePortfolioRepository
@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measure equipment and exposure metadata patterns.",
     )
     _add_database_selection(equipment)
+    timeline = report_commands.add_parser(
+        "timeline",
+        help="Measure recorded capture dates and hours.",
+    )
+    _add_database_selection(timeline)
     enrich = commands.add_parser("enrich", help="Add source metadata to a saved dataset.")
     enrich_commands = enrich.add_subparsers(dest="enrich_command", required=True)
     exif = enrich_commands.add_parser(
@@ -131,6 +136,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.report_command == "equipment":
             print(render_equipment(analyze_equipment(portfolio)))
+            return 0
+        if args.report_command == "timeline":
+            print(render_timeline(analyze_timeline(portfolio)))
             return 0
     if args.command == "enrich" and args.enrich_command == "exif":
         if not args.api_key:
