@@ -2,7 +2,15 @@ from collections.abc import Iterator
 from importlib import import_module
 
 from ppa.cli import main
-from ppa.models import Asset, Gallery, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Gallery,
+    GalleryPlacement,
+    MediaType,
+    Portfolio,
+    SourceReference,
+)
 from ppa.storage import SQLitePortfolioRepository
 
 
@@ -13,23 +21,23 @@ def test_init_db_command_creates_database(tmp_path) -> None:
 
 
 def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys) -> None:
+    asset = Asset(
+        SourceReference(
+            "image-1",
+            "https://example.smugmug.com/People/i-image-1",
+        ),
+        AssetMetadata(MediaType.PHOTOGRAPH),
+    )
     portfolio = Portfolio(
-        source="smugmug",
-        source_id="example",
-        title="Example Photographer",
-        source_url="https://example.smugmug.com",
+        "smugmug",
+        SourceReference("example", "https://example.smugmug.com"),
+        "Example Photographer",
+        assets=(asset,),
         galleries=(
             Gallery(
-                source_id="gallery-1",
-                title="People",
-                source_url="https://example.smugmug.com/People",
-                assets=(
-                    Asset(
-                        source_id="image-1",
-                        source_url="https://example.smugmug.com/People/i-image-1",
-                        gallery_source_id="gallery-1",
-                    ),
-                ),
+                SourceReference("gallery-1", "https://example.smugmug.com/People"),
+                "People",
+                placements=(GalleryPlacement("image-1"),),
             ),
         ),
     )
@@ -41,10 +49,9 @@ def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys)
 
         def discover_portfolio(self) -> Portfolio:
             return Portfolio(
-                source=portfolio.source,
-                source_id=portfolio.source_id,
-                title=portfolio.title,
-                source_url=portfolio.source_url,
+                portfolio.source_name,
+                portfolio.source,
+                portfolio.title,
             )
 
         def iter_galleries(self, discovered: Portfolio) -> Iterator[Gallery]:
@@ -52,7 +59,7 @@ def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys)
             yield from portfolio.galleries
 
         def iter_assets(self, gallery: Gallery) -> Iterator[Asset]:
-            yield from gallery.assets
+            yield from portfolio.gallery_assets(gallery)
 
     cli_module = import_module("ppa.cli.main")
     monkeypatch.setattr(cli_module, "SmugMugSource", FakeSource)
@@ -76,24 +83,23 @@ def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys)
 
 def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None:
     database = tmp_path / "portfolio.sqlite3"
+    asset = Asset(
+        SourceReference("image", "https://example.test/image"),
+        AssetMetadata(
+            MediaType.PHOTOGRAPH,
+            values={"OriginalWidth": 3, "OriginalHeight": 2, "Format": "JPG"},
+        ),
+    )
     portfolio = Portfolio(
-        source="test",
-        source_id="example",
-        title="Example Portfolio",
-        source_url="https://example.test",
+        "test",
+        SourceReference("example", "https://example.test"),
+        "Example Portfolio",
+        assets=(asset,),
         galleries=(
             Gallery(
-                source_id="gallery",
-                title="Gallery",
-                source_url="https://example.test/gallery",
-                assets=(
-                    Asset(
-                        source_id="image",
-                        source_url="https://example.test/image",
-                        gallery_source_id="gallery",
-                        metadata={"OriginalWidth": 3, "OriginalHeight": 2, "Format": "JPG"},
-                    ),
-                ),
+                SourceReference("gallery", "https://example.test/gallery"),
+                "Gallery",
+                placements=(GalleryPlacement("image"),),
             ),
         ),
     )
@@ -139,23 +145,20 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
 
 def test_enrich_exif_updates_saved_asset(monkeypatch, tmp_path, capsys) -> None:
     database = tmp_path / "portfolio.sqlite3"
+    asset = Asset(
+        SourceReference("image-1", "https://example.smugmug.com/image"),
+        AssetMetadata(MediaType.PHOTOGRAPH),
+    )
     portfolio = Portfolio(
-        source="smugmug",
-        source_id="example",
-        title="Example Portfolio",
-        source_url="https://example.smugmug.com",
+        "smugmug",
+        SourceReference("example", "https://example.smugmug.com"),
+        "Example Portfolio",
+        assets=(asset,),
         galleries=(
             Gallery(
-                source_id="gallery",
-                title="Gallery",
-                source_url="https://example.smugmug.com/gallery",
-                assets=(
-                    Asset(
-                        source_id="image-1",
-                        source_url="https://example.smugmug.com/image",
-                        gallery_source_id="gallery",
-                    ),
-                ),
+                SourceReference("gallery", "https://example.smugmug.com/gallery"),
+                "Gallery",
+                placements=(GalleryPlacement("image-1"),),
             ),
         ),
     )
@@ -195,4 +198,4 @@ def test_enrich_exif_updates_saved_asset(monkeypatch, tmp_path, capsys) -> None:
     with SQLitePortfolioRepository(database) as repository:
         enriched = repository.get("smugmug", "example")
     assert enriched is not None
-    assert enriched.galleries[0].assets[0].exif["Model"] == "Camera A"
+    assert enriched.assets[0].exif["Model"] == "Camera A"
