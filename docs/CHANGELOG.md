@@ -38,6 +38,8 @@ The format is intentionally simple. This project values documenting the evolutio
 
 - Expanded the `GallerySource` contract to cover discovery, gallery and asset enumeration,
   metadata enrichment, normalized failures, and source-owned temporary preview access.
+- Moved normalized portfolio composition from source adapters into a shared,
+  provider-agnostic loader.
 
 ### Fixed
 
