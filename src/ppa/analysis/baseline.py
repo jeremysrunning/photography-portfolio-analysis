@@ -55,6 +55,11 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     photographs = [asset for asset in portfolio.assets if is_photograph(asset)]
     total = len(photographs)
     reference_count = sum(len(gallery.placements) for gallery in portfolio.galleries)
+    placed_asset_ids = {
+        placement.asset_source_id
+        for gallery in portfolio.galleries
+        for placement in gallery.placements
+    }
     gallery_sizes = [len(gallery.placements) for gallery in portfolio.galleries]
 
     captured = [asset.captured_at for asset in photographs if asset.captured_at is not None]
@@ -107,7 +112,7 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
         unique_media=len(portfolio.assets),
         unique_photographs=total,
         excluded_non_photographs=len(portfolio.assets) - total,
-        duplicate_references=reference_count - len(portfolio.assets),
+        duplicate_references=reference_count - len(placed_asset_ids),
         gallery_size_min=min(gallery_sizes, default=0),
         gallery_size_median=float(median(gallery_sizes)) if gallery_sizes else 0.0,
         gallery_size_max=max(gallery_sizes, default=0),

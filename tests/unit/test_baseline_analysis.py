@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from ppa.analysis import analyze_baseline
 from ppa.models import (
     Asset,
@@ -87,3 +89,42 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
     assert report.capture_date_coverage.available == 1
     assert report.geolocation_coverage.available == 1
     assert "Missing metadata is reported as missing" in render_baseline(report)
+
+
+@pytest.mark.parametrize(
+    ("gallery_assets", "expected"),
+    [
+        ((), 0),
+        (("placed",), 0),
+        (("placed", "placed"), 1),
+        (("placed", "second", "placed"), 1),
+    ],
+)
+def test_additional_placements_ignore_unplaced_assets(
+    gallery_assets: tuple[str, ...],
+    expected: int,
+) -> None:
+    assets = tuple(
+        Asset(
+            _reference(source_id),
+            AssetMetadata(MediaType.PHOTOGRAPH),
+        )
+        for source_id in ("placed", "second", "unplaced")
+    )
+    galleries = tuple(
+        Gallery(
+            _reference(f"gallery-{index}"),
+            f"Gallery {index}",
+            placements=(GalleryPlacement(source_id),),
+        )
+        for index, source_id in enumerate(gallery_assets)
+    )
+    portfolio = Portfolio(
+        "test",
+        _reference("portfolio"),
+        "Portfolio",
+        assets=assets,
+        galleries=galleries,
+    )
+
+    assert analyze_baseline(portfolio).duplicate_references == expected
