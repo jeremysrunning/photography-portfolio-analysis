@@ -33,6 +33,8 @@ The format is intentionally simple. This project values documenting the evolutio
 - Source-agnostic timeline habits analysis with yearly, monthly, recorded-hour, camera,
   and gallery distributions plus explicit timezone limitations.
 - Schema-versioned SQLite normalized dataset storage.
+- Relational SQLite gallery placements with unique-asset persistence, transactional
+  idempotent updates, conservative record retention, and version-2 migration support.
 - Structured JSON logging.
 - Pytest test suite and Ruff configuration.
 
