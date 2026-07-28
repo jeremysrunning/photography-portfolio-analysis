@@ -64,6 +64,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measure recorded capture dates and hours.",
     )
     _add_database_selection(timeline)
+    timeline.add_argument(
+        "--details",
+        action="store_true",
+        help="Include complete yearly, monthly, and recorded-hour distributions.",
+    )
+    timeline.add_argument(
+        "--camera-breakdown",
+        action="store_true",
+        help="Include complete per-camera timeline distributions.",
+    )
+    timeline.add_argument(
+        "--gallery-breakdown",
+        action="store_true",
+        help="Include complete per-gallery timeline distributions.",
+    )
     enrich = commands.add_parser("enrich", help="Add source metadata to a saved dataset.")
     enrich_commands = enrich.add_subparsers(dest="enrich_command", required=True)
     exif = enrich_commands.add_parser(
@@ -138,7 +153,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(render_equipment(analyze_equipment(portfolio)))
             return 0
         if args.report_command == "timeline":
-            print(render_timeline(analyze_timeline(portfolio)))
+            print(
+                render_timeline(
+                    analyze_timeline(portfolio),
+                    details=args.details,
+                    camera_breakdown=args.camera_breakdown,
+                    gallery_breakdown=args.gallery_breakdown,
+                )
+            )
             return 0
     if args.command == "enrich" and args.enrich_command == "exif":
         if not args.api_key:
