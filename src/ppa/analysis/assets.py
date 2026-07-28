@@ -56,3 +56,14 @@ def text_value(asset: Asset, *names: str) -> str | None:
         stripped = value.strip()
         return stripped or None
     return None
+
+
+def camera_name(asset: Asset) -> str | None:
+    """Return the normalized available camera make and model."""
+    make = text_value(asset, "Make", "CameraMake", "make")
+    model = text_value(asset, "Model", "CameraModel", "model", "camera_model")
+    if not model:
+        return make
+    if make and not model.casefold().startswith(make.casefold()):
+        return f"{make} {model}"
+    return model

@@ -4,7 +4,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 
-from ppa.analysis.assets import asset_value, text_value, unique_photographs
+from ppa.analysis.assets import asset_value, camera_name, text_value, unique_photographs
 from ppa.analysis.baseline import Coverage
 from ppa.models import Asset, Portfolio
 
@@ -65,7 +65,7 @@ def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
     cameras_by_year: dict[int, Counter[str]] = defaultdict(Counter)
 
     for asset in photographs:
-        camera = _camera(asset)
+        camera = camera_name(asset)
         if camera:
             cameras[camera] += 1
             if asset.captured_at:
@@ -115,16 +115,6 @@ def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
         iso_ranges=_ordered_ranges(iso_ranges, _iso_range_order()),
         yearly_cameras=yearly,
     )
-
-
-def _camera(asset: Asset) -> str | None:
-    make = text_value(asset, "Make", "CameraMake", "make")
-    model = text_value(asset, "Model", "CameraModel", "model", "camera_model")
-    if not model:
-        return make
-    if make and not model.casefold().startswith(make.casefold()):
-        return f"{make} {model}"
-    return model
 
 
 def _number(asset: Asset, *names: str) -> float | None:

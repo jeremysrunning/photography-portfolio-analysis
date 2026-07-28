@@ -146,6 +146,31 @@ recorded camera and lens models, focal-length ranges and exact values, apertures
 times, ISO ranges and exact values, and the most frequently recorded camera in each capture
 year. Distribution percentages use only photographs where that EXIF field is available.
 
+Generate a timeline report:
+
+```console
+ppa report timeline portfolio.sqlite3
+```
+
+The timeline report describes yearly and monthly capture counts, recorded capture hours,
+and camera and gallery segments with sample sizes and timestamp coverage. UTC, explicit
+offsets, and timezone-unknown timestamps remain separate; the report does not infer a
+local timezone or interpret capture volume as productivity.
+
+The default output is a concise evidence and measurement summary with the five most
+represented camera models and ten largest galleries. Request exhaustive sections
+independently:
+
+```console
+ppa report timeline portfolio.sqlite3 --details
+ppa report timeline portfolio.sqlite3 --camera-breakdown
+ppa report timeline portfolio.sqlite3 --gallery-breakdown
+```
+
+`--details` adds complete yearly, monthly, and recorded-hour distributions. The camera
+and gallery flags add their respective complete per-segment distributions. Flags can be
+combined without duplicating sections.
+
 The baseline distinguishes gallery placements from unique image identities and reports
 gallery-size distribution, capture range, orientation, file-format distribution, geotag
 coverage, and camera/lens metadata coverage. Non-photo media already present in a dataset

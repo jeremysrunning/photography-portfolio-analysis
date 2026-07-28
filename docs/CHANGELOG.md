@@ -30,6 +30,8 @@ The format is intentionally simple. This project values documenting the evolutio
 - Source-agnostic equipment and exposure analysis.
 - Equipment report covering evidence, camera and lens use, focal length, aperture, exposure,
   ISO, and capture-year camera patterns.
+- Source-agnostic timeline habits analysis with yearly, monthly, recorded-hour, camera,
+  and gallery distributions plus explicit timezone limitations.
 - Schema-versioned SQLite normalized dataset storage.
 - Structured JSON logging.
 - Pytest test suite and Ruff configuration.
@@ -40,6 +42,9 @@ The format is intentionally simple. This project values documenting the evolutio
   metadata enrichment, normalized failures, and source-owned temporary preview access.
 - Moved normalized portfolio composition from source adapters into a shared,
   provider-agnostic loader.
+- Made the default timeline report concise, with deterministic summary measurements,
+  five recorded camera-use summaries, ten top galleries, and optional exhaustive detail
+  sections.
 
 ### Fixed
 
