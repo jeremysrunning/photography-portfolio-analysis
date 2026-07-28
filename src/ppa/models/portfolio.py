@@ -1,11 +1,37 @@
 """Normalized portfolio data structures."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from types import MappingProxyType
 from urllib.parse import urlsplit
 
-JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+JsonValue = (
+    None
+    | bool
+    | int
+    | float
+    | str
+    | list["JsonValue"]
+    | tuple["JsonValue", ...]
+    | Mapping[str, "JsonValue"]
+)
+
+
+def _freeze_json(value: JsonValue) -> JsonValue:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_json(item) for item in value)
+    return value
+
+
+def _freeze_mapping(value: Mapping[str, JsonValue]) -> Mapping[str, JsonValue]:
+    frozen = _freeze_json(value)
+    if not isinstance(frozen, Mapping):  # pragma: no cover - narrowed by the input type
+        raise TypeError("metadata must be a mapping")
+    return frozen
 
 
 def _required(value: str, name: str) -> None:
@@ -22,14 +48,14 @@ def _url(value: str, name: str) -> None:
 def _json_value(value: object) -> bool:
     if value is None or isinstance(value, bool | int | float | str):
         return True
-    if isinstance(value, list):
+    if isinstance(value, list | tuple):
         return all(_json_value(item) for item in value)
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         return all(isinstance(key, str) and _json_value(item) for key, item in value.items())
     return False
 
 
-def _metadata(value: dict[str, JsonValue], name: str) -> None:
+def _metadata(value: Mapping[str, JsonValue], name: str) -> None:
     if not _json_value(value):
         raise ValueError(f"{name} must contain only JSON-compatible values")
 
@@ -44,7 +70,7 @@ class MediaType(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class SourceReference:
-    """Stable provider identity and URL within a portfolio source namespace."""
+    """Stable provider identity and network URL within a source namespace."""
 
     source_id: str
     source_url: str
@@ -60,14 +86,16 @@ class AssetMetadata:
 
     media_type: MediaType = MediaType.UNKNOWN
     captured_at: datetime | None = None
-    values: dict[str, JsonValue] = field(default_factory=dict)
-    exif: dict[str, JsonValue] = field(default_factory=dict)
+    values: Mapping[str, JsonValue] = field(default_factory=dict)
+    exif: Mapping[str, JsonValue] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_type, MediaType):
             raise ValueError("media_type must be a MediaType")
         _metadata(self.values, "metadata values")
         _metadata(self.exif, "EXIF metadata")
+        object.__setattr__(self, "values", _freeze_mapping(self.values))
+        object.__setattr__(self, "exif", _freeze_mapping(self.exif))
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,11 +167,11 @@ class Asset:
         return self.metadata.media_type
 
     @property
-    def values(self) -> dict[str, JsonValue]:
+    def values(self) -> Mapping[str, JsonValue]:
         return self.metadata.values
 
     @property
-    def exif(self) -> dict[str, JsonValue]:
+    def exif(self) -> Mapping[str, JsonValue]:
         return self.metadata.exif
 
 
@@ -164,7 +192,7 @@ class Gallery:
     source: SourceReference
     title: str
     parent_source_id: str | None = None
-    metadata: dict[str, JsonValue] = field(default_factory=dict)
+    metadata: Mapping[str, JsonValue] = field(default_factory=dict)
     placements: tuple[GalleryPlacement, ...] = ()
 
     def __post_init__(self) -> None:
@@ -172,6 +200,7 @@ class Gallery:
         if self.parent_source_id is not None:
             _required(self.parent_source_id, "parent_source_id")
         _metadata(self.metadata, "gallery metadata")
+        object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
         identities = [placement.asset_source_id for placement in self.placements]
         if len(identities) != len(set(identities)):
             raise ValueError("gallery placements must be unique")
@@ -192,7 +221,7 @@ class Portfolio:
     source_name: str
     source: SourceReference
     title: str
-    metadata: dict[str, JsonValue] = field(default_factory=dict)
+    metadata: Mapping[str, JsonValue] = field(default_factory=dict)
     assets: tuple[Asset, ...] = ()
     galleries: tuple[Gallery, ...] = ()
     observations: tuple[Observation, ...] = ()
@@ -202,6 +231,7 @@ class Portfolio:
         _required(self.source_name, "source_name")
         _required(self.title, "portfolio title")
         _metadata(self.metadata, "portfolio metadata")
+        object.__setattr__(self, "metadata", _freeze_mapping(self.metadata))
         asset_ids = [asset.source_id for asset in self.assets]
         if len(asset_ids) != len(set(asset_ids)):
             raise ValueError("portfolio asset source identities must be unique")

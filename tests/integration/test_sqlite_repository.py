@@ -216,6 +216,10 @@ def test_round_trip_preserves_semantic_graph_missing_values_and_updates(tmp_path
     assert loaded.assets[0].captured_at is not None
     assert loaded.assets[0].captured_at.utcoffset() == timedelta(hours=-8)
     assert loaded.assets[1].media_type is MediaType.NON_PHOTO
+    with pytest.raises(TypeError):
+        loaded.assets[0].values["Caption"] = "Changed after load"
+    with pytest.raises(TypeError):
+        loaded.metadata["description"] = "Changed after load"
     assert loaded.gallery_assets(loaded.galleries[0])[0] == loaded.assets[0]
     assert loaded.gallery_assets(loaded.galleries[1])[0] == loaded.assets[0]
     assert _counts(database) == (1, 3, 2, 3)

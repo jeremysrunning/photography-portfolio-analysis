@@ -2,7 +2,7 @@
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -768,7 +768,15 @@ class SQLitePortfolioRepository:
 
 
 def _json(value: Any) -> str:
-    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+    return json.dumps(_mutable_json(value), separators=(",", ":"), sort_keys=True)
+
+
+def _mutable_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _mutable_json(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_mutable_json(item) for item in value]
+    return value
 
 
 def _legacy_media_type(metadata: dict[str, JsonValue]) -> MediaType:
