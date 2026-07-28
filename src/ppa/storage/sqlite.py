@@ -8,9 +8,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ppa.models import Asset, Finding, Gallery, Measurement, Observation, Portfolio
+from ppa.models import Asset, Finding, Gallery, JsonValue, Measurement, Observation, Portfolio
+from ppa.storage.base import EnrichmentStatus, EnrichmentTarget
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 _SCHEMA = """
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -56,6 +57,19 @@ CREATE TABLE IF NOT EXISTS assets (
     FOREIGN KEY (source, portfolio_source_id, gallery_source_id)
         REFERENCES galleries(source, portfolio_source_id, source_id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS asset_enrichments (
+    source TEXT NOT NULL,
+    portfolio_source_id TEXT NOT NULL,
+    asset_source_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('completed', 'failed')),
+    attempts INTEGER NOT NULL,
+    last_error TEXT,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (source, portfolio_source_id, asset_source_id, kind),
+    FOREIGN KEY (source, portfolio_source_id)
+        REFERENCES portfolios(source, source_id) ON DELETE CASCADE
+);
 """
 
 
@@ -65,6 +79,7 @@ class SQLitePortfolioRepository:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self._connection: sqlite3.Connection | None = None
+        self._initialized = False
 
     def __enter__(self) -> "SQLitePortfolioRepository":
         self._connect()
@@ -91,14 +106,18 @@ class SQLitePortfolioRepository:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+            self._initialized = False
 
     def initialize(self) -> None:
+        if self._initialized:
+            return
         with self._transaction() as connection:
             connection.executescript(_SCHEMA)
             connection.execute(
                 "INSERT OR REPLACE INTO schema_metadata (key, value) VALUES ('version', ?)",
                 (str(SCHEMA_VERSION),),
             )
+        self._initialized = True
 
     def save(self, portfolio: Portfolio) -> None:
         self.initialize()
@@ -221,6 +240,171 @@ class SQLitePortfolioRepository:
             "SELECT source, source_id FROM portfolios ORDER BY source, source_id"
         )
         return tuple((row["source"], row["source_id"]) for row in rows)
+
+    def list_enrichment_targets(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        kind: str,
+        *,
+        retry_failed: bool = False,
+        limit: int | None = None,
+    ) -> tuple[EnrichmentTarget, ...]:
+        self.initialize()
+        status_clause = "(enrichment.status IS NULL OR enrichment.status = 'failed')"
+        if not retry_failed:
+            status_clause = "enrichment.status IS NULL"
+        limit_clause = ""
+        parameters: list[Any] = [kind, source, portfolio_source_id]
+        if limit is not None:
+            if limit < 1:
+                return ()
+            limit_clause = "LIMIT ?"
+            parameters.append(limit)
+        rows = self._connect().execute(
+            f"""
+            SELECT assets.source_id, MIN(assets.metadata_json) AS metadata_json
+            FROM assets
+            LEFT JOIN asset_enrichments AS enrichment
+              ON enrichment.source = assets.source
+             AND enrichment.portfolio_source_id = assets.portfolio_source_id
+             AND enrichment.asset_source_id = assets.source_id
+             AND enrichment.kind = ?
+            WHERE assets.source = ?
+              AND assets.portfolio_source_id = ?
+              AND {status_clause}
+            GROUP BY assets.source_id
+            ORDER BY assets.source_id
+            {limit_clause}
+            """,
+            parameters,
+        )
+        return tuple(
+            EnrichmentTarget(row["source_id"], json.loads(row["metadata_json"])) for row in rows
+        )
+
+    def save_asset_enrichment(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        kind: str,
+        values: dict[str, JsonValue],
+    ) -> None:
+        if kind != "exif":
+            raise ValueError(f"unsupported enrichment kind: {kind}")
+        self.initialize()
+        with self._transaction() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE assets
+                SET exif_json = ?
+                WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
+                """,
+                (_json(values), source, portfolio_source_id, asset_source_id),
+            )
+            if cursor.rowcount == 0:
+                raise KeyError(f"asset not found: {asset_source_id}")
+            self._upsert_enrichment(
+                connection,
+                source,
+                portfolio_source_id,
+                asset_source_id,
+                kind,
+                "completed",
+                None,
+            )
+
+    def fail_asset_enrichment(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        kind: str,
+        error: str,
+    ) -> None:
+        self.initialize()
+        with self._transaction() as connection:
+            self._upsert_enrichment(
+                connection,
+                source,
+                portfolio_source_id,
+                asset_source_id,
+                kind,
+                "failed",
+                error[:1000],
+            )
+
+    def enrichment_status(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        kind: str,
+    ) -> EnrichmentStatus:
+        self.initialize()
+        row = (
+            self._connect()
+            .execute(
+                """
+            WITH unique_assets AS (
+                SELECT DISTINCT source_id
+                FROM assets
+                WHERE source = ? AND portfolio_source_id = ?
+            )
+            SELECT
+                SUM(CASE WHEN enrichment.status IS NULL THEN 1 ELSE 0 END) AS pending,
+                SUM(CASE WHEN enrichment.status = 'completed' THEN 1 ELSE 0 END) AS completed,
+                SUM(CASE WHEN enrichment.status = 'failed' THEN 1 ELSE 0 END) AS failed
+            FROM unique_assets
+            LEFT JOIN asset_enrichments AS enrichment
+              ON enrichment.source = ?
+             AND enrichment.portfolio_source_id = ?
+             AND enrichment.asset_source_id = unique_assets.source_id
+             AND enrichment.kind = ?
+            """,
+                (source, portfolio_source_id, source, portfolio_source_id, kind),
+            )
+            .fetchone()
+        )
+        return EnrichmentStatus(
+            pending=int(row["pending"] or 0),
+            completed=int(row["completed"] or 0),
+            failed=int(row["failed"] or 0),
+        )
+
+    @staticmethod
+    def _upsert_enrichment(
+        connection: sqlite3.Connection,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        kind: str,
+        status: str,
+        last_error: str | None,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO asset_enrichments (
+                source, portfolio_source_id, asset_source_id, kind,
+                status, attempts, last_error, updated_at
+            ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+            ON CONFLICT (source, portfolio_source_id, asset_source_id, kind)
+            DO UPDATE SET
+                status = excluded.status,
+                attempts = asset_enrichments.attempts + 1,
+                last_error = excluded.last_error,
+                updated_at = excluded.updated_at
+            """,
+            (
+                source,
+                portfolio_source_id,
+                asset_source_id,
+                kind,
+                status,
+                last_error,
+                datetime.now().astimezone().isoformat(),
+            ),
+        )
 
     def _read_gallery(
         self,

@@ -24,6 +24,12 @@ The format is intentionally simple. This project values documenting the evolutio
 - Source-agnostic baseline metadata analysis and neutral text report.
 - Explicit distinction between media references, unique photographs, gallery placements,
   and excluded non-photo media.
+- Schema-versioned, per-asset enrichment state.
+- Resumable SmugMug EXIF enrichment using API multi-get batches.
+- Rate-limit-aware progress preservation and explicit failed-item retries.
+- Source-agnostic equipment and exposure analysis.
+- Equipment report covering evidence, camera and lens use, focal length, aperture, exposure,
+  ISO, and capture-year camera patterns.
 - Schema-versioned SQLite normalized dataset storage.
 - Structured JSON logging.
 - Pytest test suite and Ruff configuration.

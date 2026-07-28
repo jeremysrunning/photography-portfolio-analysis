@@ -7,12 +7,12 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ppa import __version__
-from ppa.analysis import analyze_baseline
+from ppa.analysis import analyze_baseline, analyze_equipment
 from ppa.core.logging import configure_logging
 from ppa.models import Portfolio
-from ppa.reports import render_baseline
-from ppa.sources import SourceError
-from ppa.sources.smugmug import SmugMugSource
+from ppa.reports import render_baseline, render_equipment
+from ppa.sources import SourceError, SourceRateLimitError
+from ppa.sources.smugmug import SmugMugApiClient, SmugMugExifEnricher, SmugMugSource
 from ppa.storage.sqlite import SQLitePortfolioRepository
 
 logger = logging.getLogger(__name__)
@@ -54,6 +54,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measure dataset shape and metadata coverage.",
     )
     _add_database_selection(baseline)
+    equipment = report_commands.add_parser(
+        "equipment",
+        help="Measure equipment and exposure metadata patterns.",
+    )
+    _add_database_selection(equipment)
+    enrich = commands.add_parser("enrich", help="Add source metadata to a saved dataset.")
+    enrich_commands = enrich.add_subparsers(dest="enrich_command", required=True)
+    exif = enrich_commands.add_parser(
+        "exif",
+        help="Fetch public SmugMug image metadata.",
+    )
+    _add_database_selection(exif)
+    exif.add_argument(
+        "--api-key",
+        default=os.environ.get("PPA_SMUGMUG_API_KEY"),
+        help="SmugMug API key (prefer PPA_SMUGMUG_API_KEY).",
+    )
+    exif.add_argument(
+        "--batch-size",
+        type=int,
+        default=25,
+        help="Images per SmugMug multi-get request (1-100; default: 25).",
+    )
+    exif.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum unique assets to process in this run.",
+    )
+    exif.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry assets that failed in an earlier run.",
+    )
     return parser
 
 
@@ -96,6 +129,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.report_command == "baseline":
             print(render_baseline(analyze_baseline(portfolio)))
             return 0
+        if args.report_command == "equipment":
+            print(render_equipment(analyze_equipment(portfolio)))
+            return 0
+    if args.command == "enrich" and args.enrich_command == "exif":
+        if not args.api_key:
+            parser.error(
+                "enrich exif requires --api-key or the PPA_SMUGMUG_API_KEY environment variable"
+            )
+        if args.batch_size < 1 or args.batch_size > 100:
+            parser.error("--batch-size must be between 1 and 100")
+        if args.limit is not None and args.limit < 1:
+            parser.error("--limit must be greater than zero")
+        try:
+            portfolio = _load_stored_portfolio(args.database, args.source, args.source_id)
+            if portfolio.source != "smugmug":
+                raise SourceError(
+                    f"EXIF enrichment is not implemented for source: {portfolio.source}"
+                )
+            return _enrich_exif(portfolio, args)
+        except SourceRateLimitError as error:
+            logger.warning("exif_enrichment_rate_limited", extra={"reason": str(error)})
+            print(str(error))
+            print("Progress was saved. Run the same command again after the retry interval.")
+            return 2
+        except (OSError, SourceError, ValueError) as error:
+            logger.error("exif_enrichment_failed", extra={"reason": str(error)})
+            return 1
 
     parser.print_help()
     return 0
@@ -160,3 +220,61 @@ def _print_stored_portfolio(portfolio: Portfolio) -> None:
     print(f"Unique photographs: {baseline.unique_photographs:,}")
     print(f"Non-photo media excluded: {baseline.excluded_non_photographs:,}")
     print(f"Additional gallery placements: {baseline.duplicate_references:,}")
+
+
+def _enrich_exif(portfolio: Portfolio, args: argparse.Namespace) -> int:
+    with SQLitePortfolioRepository(args.database) as repository:
+        before = repository.enrichment_status(
+            portfolio.source,
+            portfolio.source_id,
+            "exif",
+        )
+        targets = repository.list_enrichment_targets(
+            portfolio.source,
+            portfolio.source_id,
+            "exif",
+            retry_failed=args.retry_failed,
+            limit=args.limit,
+        )
+        print(
+            "EXIF enrichment status: "
+            f"{before.completed:,} completed, {before.pending:,} pending, "
+            f"{before.failed:,} failed"
+        )
+        if not targets:
+            print("No eligible assets need EXIF enrichment.")
+            return 0
+
+        client = SmugMugApiClient(portfolio.source_url, args.api_key)
+        enricher = SmugMugExifEnricher(
+            client,
+            repository,
+            batch_size=args.batch_size,
+        )
+        progress_interval = args.batch_size * 10
+
+        def show_progress(processed: int, total: int, failed: int) -> None:
+            if processed == total or processed % progress_interval == 0:
+                print(f"Processed {processed:,} / {total:,} ({failed:,} failed)")
+
+        result = enricher.enrich(
+            portfolio.source,
+            portfolio.source_id,
+            targets,
+            show_progress,
+        )
+        after = repository.enrichment_status(
+            portfolio.source,
+            portfolio.source_id,
+            "exif",
+        )
+    print(
+        "Run complete: "
+        f"{result.completed:,} completed, {result.failed:,} failed, "
+        f"{result.skipped_non_photos:,} non-photo assets skipped"
+    )
+    print(
+        "Overall status: "
+        f"{after.completed:,} completed, {after.pending:,} pending, {after.failed:,} failed"
+    )
+    return 1 if result.failed else 0
