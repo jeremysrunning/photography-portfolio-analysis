@@ -116,10 +116,10 @@ Media assets have an explicit `photograph`, `non_photo`, or `unknown` type. Unkn
 is not treated as photography, and SmugMug video records remain represented without being
 included in photographic analysis.
 
-The database carries an explicit schema version. This release creates version 4 and
-migrates version-2 and version-3 databases in place; unsupported versions fail with a clear
-error rather than being overwritten. SQLite foreign keys and transactions protect
-relationships and roll back an incomplete save.
+The database carries an explicit schema version. This release creates version 5 and
+migrates version-2, version-3, and version-4 databases in place; unsupported versions fail
+with a clear error rather than being overwritten. SQLite foreign keys and transactions
+protect relationships and roll back an incomplete save.
 
 Inspect a saved dataset without contacting SmugMug:
 
@@ -144,6 +144,12 @@ EXIF enrichment uses SmugMug multi-get requests (25 images per request by defaul
 commits each returned asset immediately. It can be interrupted and safely rerun: completed
 assets are skipped, rate-limited requests remain pending, and failed assets are retried
 only when `--retry-failed` is supplied.
+
+Native focal length and the independently reported 35 mm-equivalent focal length are
+normalized into typed millimeter fields from SmugMug's confirmed `FocalLength` and
+`FocalLength35mm` metadata. Integer, decimal, and rational representations are accepted.
+Missing or malformed values remain missing, and no crop factor, effective focal length,
+or underlying lens is inferred.
 
 Useful controls:
 
@@ -195,8 +201,9 @@ combined without duplicating sections.
 
 The baseline distinguishes gallery placements from unique image identities and reports
 gallery-size distribution, capture range, orientation, file-format distribution, geotag
-coverage, and camera/lens metadata coverage. Non-photo media already present in a dataset
-is disclosed and excluded. Missing metadata is measured rather than interpreted.
+coverage, and camera, lens, native focal-length, and 35 mm-equivalent focal-length metadata
+coverage. Non-photo media already present in a dataset is disclosed and excluded. Missing
+metadata is measured rather than interpreted.
 
 The database contains metadata, source references, and derived data only. The current
 storage API has no facility for persisting original image content. SmugMug inspection does

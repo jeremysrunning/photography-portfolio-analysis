@@ -1,9 +1,11 @@
 """Normalized portfolio data structures."""
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from math import isfinite
 from types import MappingProxyType
 from urllib.parse import urlsplit
 
@@ -17,6 +19,37 @@ JsonValue = (
     | tuple["JsonValue", ...]
     | Mapping[str, "JsonValue"]
 )
+
+_FOCAL_LENGTH = re.compile(
+    r"^\s*(?P<numerator>[+]?(?:\d+(?:\.\d*)?|\.\d+))"
+    r"(?:\s*/\s*(?P<denominator>[+]?(?:\d+(?:\.\d*)?|\.\d+)))?"
+    r"\s*(?:mm)?\s*$",
+    re.IGNORECASE,
+)
+
+
+def normalize_focal_length(value: object) -> float | None:
+    """Return a positive focal length in millimeters when explicitly recorded."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        result = float(value)
+    elif isinstance(value, str):
+        match = _FOCAL_LENGTH.fullmatch(value)
+        if match is None:
+            return None
+        numerator = float(match.group("numerator"))
+        denominator_text = match.group("denominator")
+        if denominator_text is None:
+            result = numerator
+        else:
+            denominator = float(denominator_text)
+            if denominator == 0:
+                return None
+            result = numerator / denominator
+    else:
+        return None
+    return result if isfinite(result) and result > 0 else None
 
 
 def _freeze_json(value: JsonValue) -> JsonValue:
@@ -88,12 +121,25 @@ class AssetMetadata:
     captured_at: datetime | None = None
     values: Mapping[str, JsonValue] = field(default_factory=dict)
     exif: Mapping[str, JsonValue] = field(default_factory=dict)
+    focal_length_mm: float | None = None
+    focal_length_35mm: float | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_type, MediaType):
             raise ValueError("media_type must be a MediaType")
         _metadata(self.values, "metadata values")
         _metadata(self.exif, "EXIF metadata")
+        for name in ("focal_length_mm", "focal_length_35mm"):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, int | float)
+                or not isfinite(float(value))
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be a positive finite number or None")
+            if value is not None:
+                object.__setattr__(self, name, float(value))
         object.__setattr__(self, "values", _freeze_mapping(self.values))
         object.__setattr__(self, "exif", _freeze_mapping(self.exif))
 

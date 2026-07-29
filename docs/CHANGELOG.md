@@ -19,6 +19,9 @@ The format is intentionally simple. This project values documenting the evolutio
   public-boundary filtering, bounded retries, and structured progress logging.
 - SQLite schema version 4 with explicit media-type persistence and version-2/version-3
   migration compatibility.
+- Typed native and 35 mm-equivalent focal-length metadata with evidence-based SmugMug
+  normalization, SQLite schema version 5 persistence, migration backfill, and baseline
+  coverage reporting.
 - Initial project vision and documentation.
 - Project roadmap.
 - Guiding principles.

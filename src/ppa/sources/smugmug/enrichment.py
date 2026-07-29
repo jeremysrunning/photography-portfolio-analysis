@@ -4,7 +4,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ppa.models import JsonValue, MediaType
+from ppa.models import JsonValue, MediaType, normalize_focal_length
 from ppa.sources import SourceError, SourceRateLimitError
 from ppa.sources.smugmug.api import SmugMugApiClient
 from ppa.storage import EnrichmentTarget, PortfolioRepository
@@ -100,6 +100,8 @@ class SmugMugExifEnricher:
                         target.source_id,
                         "exif",
                         metadata,
+                        focal_length_mm=normalize_focal_length(metadata.get("FocalLength")),
+                        focal_length_35mm=normalize_focal_length(metadata.get("FocalLength35mm")),
                     )
                     completed += 1
             if progress:

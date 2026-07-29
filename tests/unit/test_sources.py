@@ -271,6 +271,8 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
                     "Uri": "/api/v2/image/image-1!metadata",
                     "Model": "Camera A",
                     "Lens": "",
+                    "FocalLength": "105/2 mm",
+                    "FocalLength35mm": "78.75 mm",
                 }
             },
         },
@@ -310,7 +312,13 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
     asset = portfolio.assets[0]
     enriched = source.enrich_asset_metadata(asset)
     assert asset.exif == {}
-    assert enriched.exif == {"Model": "Camera A"}
+    assert enriched.exif == {
+        "Model": "Camera A",
+        "FocalLength": "105/2 mm",
+        "FocalLength35mm": "78.75 mm",
+    }
+    assert enriched.metadata.focal_length_mm == 52.5
+    assert enriched.metadata.focal_length_35mm == 78.75
     with (
         pytest.raises(SourcePreviewUnavailableError, match="no public preview URL"),
         source.open_preview(asset),

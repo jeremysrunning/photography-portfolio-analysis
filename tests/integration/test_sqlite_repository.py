@@ -46,6 +46,8 @@ def _portfolio() -> Portfolio:
                 "Caption": None,
             },
             {"Make": "Example", "Model": "Camera A", "Lens": "Lens A"},
+            focal_length_mm=35.5,
+            focal_length_35mm=52.5,
         ),
         preview_url="https://example.test/previews/1.jpg",
         measurements=(Measurement("aspect_ratio", 1.5, method="metadata"),),
@@ -248,12 +250,40 @@ def test_round_trip_preserves_semantic_graph_missing_values_and_updates(tmp_path
     assert reloaded.galleries[0].title == "Updated gallery"
     assert reloaded.assets[0].values["Caption"] == "Updated"
     assert reloaded.assets[0].exif["Model"] == "Camera A"
+    assert reloaded.assets[0].metadata.focal_length_mm == 35.5
     assert reloaded.assets[0].measurements
     assert {gallery.source_id for gallery in reloaded.galleries} == {
         "gallery-1",
         "gallery-2",
         "gallery-empty",
     }
+
+
+def test_version_four_database_backfills_focal_lengths_from_exif(tmp_path) -> None:
+    database = tmp_path / "version-four.sqlite3"
+    portfolio = _portfolio()
+    with SQLitePortfolioRepository(database) as repository:
+        repository.save(portfolio)
+
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            """
+            UPDATE assets
+            SET exif_json = ?
+            WHERE source_id = 'asset-1'
+            """,
+            ('{"FocalLength":"71/2 mm","FocalLength35mm":"53.25 mm"}',),
+        )
+        connection.execute("ALTER TABLE assets DROP COLUMN focal_length_mm")
+        connection.execute("ALTER TABLE assets DROP COLUMN focal_length_35mm")
+        connection.execute("UPDATE schema_metadata SET value = '4' WHERE key = 'version'")
+
+    with SQLitePortfolioRepository(database) as repository:
+        migrated = repository.get("test", "portfolio-1")
+
+    assert migrated is not None
+    assert migrated.assets[0].metadata.focal_length_mm == 35.5
+    assert migrated.assets[0].metadata.focal_length_35mm == 53.25
 
 
 def test_transaction_rolls_back_and_foreign_keys_are_enforced(tmp_path) -> None:

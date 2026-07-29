@@ -27,6 +27,7 @@ class FakeClient:
                     "Lens": "Lens A",
                     "ISO": 400,
                     "FocalLength": "35 mm",
+                    "FocalLength35mm": "52.5 mm",
                 },
                 {
                     "Uri": "/api/v2/image/photo-2!metadata",
@@ -87,6 +88,10 @@ def test_exif_enrichment_is_incremental_and_skips_stored_video(tmp_path) -> None
 
     assert enriched is not None
     assert enriched.assets[0].exif["Model"] == "Camera A"
+    assert enriched.assets[0].metadata.focal_length_mm == 35.0
+    assert enriched.assets[0].metadata.focal_length_35mm == 52.5
+    assert enriched.assets[1].metadata.focal_length_mm is None
+    assert enriched.assets[1].metadata.focal_length_35mm is None
     assert enriched.assets[1].exif["Model"] == "Camera B"
     assert enriched.assets[2].exif == {}
 

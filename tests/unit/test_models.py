@@ -11,6 +11,7 @@ from ppa.models import (
     MediaType,
     Portfolio,
     SourceReference,
+    normalize_focal_length,
 )
 
 
@@ -169,6 +170,37 @@ def test_normalized_metadata_is_deeply_copied_and_immutable() -> None:
 def test_finding_accepts_bounded_confidence() -> None:
     finding = Finding("Centered compositions recur.", 0.75, ("measurement:placement",))
     assert finding.confidence == 0.75
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (35, 35.0),
+        (35.5, 35.5),
+        ("35.5 mm", 35.5),
+        ("71/2", 35.5),
+        (" 70 / 2 mm ", 35.0),
+        (None, None),
+        ("unknown", None),
+        ("35 mm extra", None),
+        ("1/0", None),
+        (0, None),
+        (-35, None),
+        (True, None),
+    ],
+)
+def test_focal_length_normalization(value: object, expected: float | None) -> None:
+    assert normalize_focal_length(value) == expected
+
+
+@pytest.mark.parametrize("field", ["focal_length_mm", "focal_length_35mm"])
+def test_focal_length_fields_require_positive_finite_values(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        AssetMetadata(**{field: float("nan")})
+
+
+def test_reported_teleconverter_adjusted_focal_length_is_not_reinterpreted() -> None:
+    assert normalize_focal_length("700/10 mm") == 70.0
 
 
 @pytest.mark.parametrize("confidence", [-0.01, 1.01])

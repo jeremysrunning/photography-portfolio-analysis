@@ -28,6 +28,8 @@ def render_baseline(report: BaselineReport) -> str:
         f"  Geolocation: {_coverage(report.geolocation_coverage)}",
         f"  Camera model: {_coverage(report.camera_coverage)}",
         f"  Lens model: {_coverage(report.lens_coverage)}",
+        f"  Focal length: {_coverage(report.focal_length_coverage)}",
+        f"  35 mm equivalent: {_coverage(report.focal_length_35mm_coverage)}",
     ]
     if report.earliest_capture and report.latest_capture:
         lines.extend(

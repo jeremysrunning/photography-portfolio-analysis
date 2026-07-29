@@ -20,10 +20,11 @@ from ppa.models import (
     Observation,
     Portfolio,
     SourceReference,
+    normalize_focal_length,
 )
 from ppa.storage.base import EnrichmentStatus, EnrichmentTarget
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 _SCHEMA_STATEMENTS = (
     """
@@ -72,6 +73,8 @@ _SCHEMA_STATEMENTS = (
         ),
         metadata_json TEXT NOT NULL,
         exif_json TEXT NOT NULL,
+        focal_length_mm REAL,
+        focal_length_35mm REAL,
         measurements_json TEXT NOT NULL,
         PRIMARY KEY (source, portfolio_source_id, source_id),
         FOREIGN KEY (source, portfolio_source_id)
@@ -178,10 +181,13 @@ class SQLitePortfolioRepository:
             current_version = SCHEMA_VERSION
         if current_version == 2:
             self._migrate_v2_to_v3(connection)
-            current_version = 4
+            current_version = SCHEMA_VERSION
         if current_version == 3:
             self._migrate_v3_to_v4(connection)
             current_version = 4
+        if current_version == 4:
+            self._migrate_v4_to_v5(connection)
+            current_version = 5
         if current_version != SCHEMA_VERSION:
             raise UnsupportedSchemaVersionError(
                 f"Unsupported SQLite schema version {current_version}; "
@@ -368,6 +374,9 @@ class SQLitePortfolioRepository:
         asset_source_id: str,
         kind: str,
         values: dict[str, JsonValue],
+        *,
+        focal_length_mm: float | None = None,
+        focal_length_35mm: float | None = None,
     ) -> None:
         if kind != "exif":
             raise ValueError(f"unsupported enrichment kind: {kind}")
@@ -376,10 +385,19 @@ class SQLitePortfolioRepository:
             cursor = connection.execute(
                 """
                 UPDATE assets
-                SET exif_json = ?
+                SET exif_json = ?,
+                    focal_length_mm = ?,
+                    focal_length_35mm = ?
                 WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
                 """,
-                (_json(values), source, portfolio_source_id, asset_source_id),
+                (
+                    _json(values),
+                    focal_length_mm,
+                    focal_length_35mm,
+                    source,
+                    portfolio_source_id,
+                    asset_source_id,
+                ),
             )
             if cursor.rowcount == 0:
                 raise KeyError(f"asset not found: {asset_source_id}")
@@ -487,8 +505,9 @@ class SQLitePortfolioRepository:
             """
             INSERT INTO assets (
                 source, portfolio_source_id, source_id, source_url, preview_url,
-                captured_at, media_type, metadata_json, exif_json, measurements_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                captured_at, media_type, metadata_json, exif_json,
+                focal_length_mm, focal_length_35mm, measurements_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (source, portfolio_source_id, source_id) DO UPDATE SET
                 source_url = excluded.source_url,
                 preview_url = excluded.preview_url,
@@ -498,6 +517,14 @@ class SQLitePortfolioRepository:
                 exif_json = CASE
                     WHEN excluded.exif_json = '{}' THEN assets.exif_json
                     ELSE excluded.exif_json
+                END,
+                focal_length_mm = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.focal_length_mm
+                    ELSE excluded.focal_length_mm
+                END,
+                focal_length_35mm = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.focal_length_35mm
+                    ELSE excluded.focal_length_35mm
                 END,
                 measurements_json = CASE
                     WHEN excluded.measurements_json = '[]' THEN assets.measurements_json
@@ -513,6 +540,8 @@ class SQLitePortfolioRepository:
                 asset.media_type.value,
                 _json(asset.values),
                 _json(asset.exif),
+                asset.metadata.focal_length_mm,
+                asset.metadata.focal_length_35mm,
                 _json(
                     [
                         {
@@ -620,6 +649,8 @@ class SQLitePortfolioRepository:
                 ),
                 values=json.loads(row["metadata_json"]),
                 exif=json.loads(row["exif_json"]),
+                focal_length_mm=row["focal_length_mm"],
+                focal_length_35mm=row["focal_length_35mm"],
             ),
             measurements=tuple(
                 Measurement(
@@ -741,6 +772,43 @@ class SQLitePortfolioRepository:
                 "ALTER TABLE assets ADD COLUMN media_type TEXT NOT NULL DEFAULT 'unknown'"
             )
             SQLitePortfolioRepository._backfill_media_types(connection)
+            connection.execute(
+                "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
+                ("4",),
+            )
+
+    @staticmethod
+    def _migrate_v4_to_v5(connection: sqlite3.Connection) -> None:
+        with connection:
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(assets)").fetchall()
+            }
+            if "focal_length_mm" not in columns:
+                connection.execute("ALTER TABLE assets ADD COLUMN focal_length_mm REAL")
+            if "focal_length_35mm" not in columns:
+                connection.execute("ALTER TABLE assets ADD COLUMN focal_length_35mm REAL")
+            rows = connection.execute(
+                """
+                SELECT source, portfolio_source_id, source_id, exif_json
+                FROM assets
+                """
+            ).fetchall()
+            for row in rows:
+                exif = json.loads(row["exif_json"])
+                connection.execute(
+                    """
+                    UPDATE assets
+                    SET focal_length_mm = ?, focal_length_35mm = ?
+                    WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
+                    """,
+                    (
+                        normalize_focal_length(exif.get("FocalLength")),
+                        normalize_focal_length(exif.get("FocalLength35mm")),
+                        row["source"],
+                        row["portfolio_source_id"],
+                        row["source_id"],
+                    ),
+                )
             connection.execute(
                 "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
                 (str(SCHEMA_VERSION),),
