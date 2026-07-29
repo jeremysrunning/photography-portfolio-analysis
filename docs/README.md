@@ -95,9 +95,11 @@ ppa inspect https://example.smugmug.com --database portfolio.sqlite3
 for public API requests. OAuth is not required for public data. The key can also be supplied
 with `--api-key`, although the environment variable avoids placing it in shell history.
 
-The command discovers all public albums, follows paginated album-image listings, prints
-gallery and media-reference counts, and optionally saves the normalized dataset.
-Password-protected, unlisted, and private content is outside this first slice.
+The command follows SmugMug's linked root-node hierarchy to discover nested public folders
+and albums, including empty albums, then follows paginated album-image listings. Explicitly
+private, unlisted, and password-protected nodes are skipped. Rate limits and transient
+request failures use bounded retries with structured progress logging. The command prints
+gallery and media-reference counts and optionally saves the normalized dataset.
 
 SQLite stores normalized portfolio, gallery, unique-asset, and gallery-placement records.
 Saving the same crawl again updates matching source-scoped identities without creating

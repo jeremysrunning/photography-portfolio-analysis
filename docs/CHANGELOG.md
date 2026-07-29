@@ -15,6 +15,8 @@ The format is intentionally simple. This project values documenting the evolutio
   relationships.
 - Deeply immutable normalized metadata mappings with defensive copying of caller-owned
   JSON-compatible structures.
+- Recursive SmugMug node discovery with linked-resource traversal, empty-gallery retention,
+  public-boundary filtering, bounded retries, and structured progress logging.
 - SQLite schema version 4 with explicit media-type persistence and version-2/version-3
   migration compatibility.
 - Initial project vision and documentation.

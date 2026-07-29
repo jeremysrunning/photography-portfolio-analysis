@@ -38,6 +38,10 @@ class SourceRateLimitError(SourceError):
         super().__init__(message)
 
 
+class SourceTransientError(SourceError):
+    """A temporary provider or network failure that may be retried."""
+
+
 @runtime_checkable
 class GallerySource(Protocol):
     """Discover and read a portfolio through normalized records.

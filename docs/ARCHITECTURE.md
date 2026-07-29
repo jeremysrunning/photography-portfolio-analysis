@@ -135,9 +135,13 @@ previous enrichment. Version-2 and version-3 databases migrate in place, and uns
 schema versions fail without being rewritten.
 
 The SmugMug adapter uses the supported public API with an API key and no OAuth. It follows
-the site's user-to-albums-to-album-images links and API pagination. It does not call raw
-image-size endpoints or download previews. This keeps public-site discovery source-specific
-while producing the same normalized dataset expected by future sources.
+the linked user root node, recursively traverses paginated child-node collections, follows
+album and album-image links, and retains empty public albums. Explicitly private, unlisted,
+or password-protected nodes are not traversed. Rate limits and transient transport failures
+use bounded retries with capped delays. Discovery and retry progress is emitted through
+structured logging. The adapter does not call raw image-size endpoints or download
+previews. This keeps public-site discovery source-specific while producing the same
+normalized dataset expected by future sources.
 
 The baseline analyzer operates only on normalized models. It measures dataset shape,
 duplicate gallery placements, metadata coverage, capture range, orientation, formats, and
