@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -19,6 +20,8 @@ from ppa.sources import (
     GallerySource,
     SourceError,
     SourcePreviewUnavailableError,
+    SourceRateLimitError,
+    SourceTransientError,
     load_portfolio,
 )
 from ppa.sources.smugmug import SmugMugApiClient, SmugMugSource
@@ -128,7 +131,7 @@ def test_fake_source_normalizes_unavailable_preview() -> None:
         pass
 
 
-def test_smugmug_source_loads_public_metadata_and_paginates() -> None:
+def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
     responses = {
         "/api/v2!siteuser": {
             "Code": 200,
@@ -137,24 +140,96 @@ def test_smugmug_source_loads_public_metadata_and_paginates() -> None:
                     "Name": "Example Photographer",
                     "NickName": "example",
                     "WebUri": "https://example.smugmug.com",
-                    "Uris": {"UserAlbums": "/api/v2/user/example!albums"},
+                    "Uris": {"Node": {"Uri": "/api/v2/node/root"}},
                 }
             },
         },
-        "/api/v2/user/example!albums": {
+        "/api/v2/node/root": {
             "Code": 200,
             "Response": {
-                "Album": [
+                "Node": {
+                    "Uri": "/api/v2/node/root",
+                    "Type": "Folder",
+                    "Uris": {"ChildNodes": {"Uri": "/api/v2/node/root!children"}},
+                }
+            },
+        },
+        "/api/v2/node/root!children": {
+            "Code": 200,
+            "Response": {
+                "Node": [
                     {
-                        "Name": "People",
-                        "Uri": "/api/v2/album/album-1",
-                        "WebUri": "https://example.smugmug.com/People",
-                        "Description": "Portrait work",
-                        "Uris": {"AlbumImages": "/api/v2/album/album-1!images"},
+                        "Uri": "/api/v2/node/folder-1",
+                        "Type": "Folder",
+                        "Privacy": "Public",
+                        "Uris": {"ChildNodes": {"Uri": "/api/v2/node/folder-1!children"}},
+                    }
+                ],
+                "Pages": {"NextPage": "/api/v2/node/root!children?start=2"},
+            },
+        },
+        "/api/v2/node/root!children?start=2&APIKey=secret": {
+            "Code": 200,
+            "Response": {
+                "Node": [
+                    {
+                        "Uri": "/api/v2/node/album-node-1",
+                        "Type": "Album",
+                        "Privacy": "Public",
+                        "Uris": {"Album": {"Uri": "/api/v2/album/album-1"}},
+                    },
+                    {
+                        "Uri": "/api/v2/node/private",
+                        "Type": "Album",
+                        "Privacy": "Private",
+                        "Uris": {"Album": {"Uri": "/api/v2/album/private"}},
+                    },
+                ],
+                "Pages": {},
+            },
+        },
+        "/api/v2/node/folder-1!children": {
+            "Code": 200,
+            "Response": {
+                "Node": [
+                    {
+                        "Uri": "/api/v2/node/empty-node",
+                        "Type": "Album",
+                        "Privacy": "Public",
+                        "Uris": {"Album": {"Uri": "/api/v2/album/empty"}},
                     }
                 ],
                 "Pages": {},
             },
+        },
+        "/api/v2/album/album-1": {
+            "Code": 200,
+            "Response": {
+                "Album": {
+                    "Name": "People",
+                    "Uri": "/api/v2/album/album-1",
+                    "WebUri": "https://example.smugmug.com/People",
+                    "Description": "Portrait work",
+                    "Privacy": "Public",
+                    "Uris": {"AlbumImages": {"Uri": "/api/v2/album/album-1!images"}},
+                }
+            },
+        },
+        "/api/v2/album/empty": {
+            "Code": 200,
+            "Response": {
+                "Album": {
+                    "Name": "Empty",
+                    "Uri": "/api/v2/album/empty",
+                    "WebUri": "https://example.smugmug.com/Empty",
+                    "Privacy": "Public",
+                    "Uris": {"AlbumImages": {"Uri": "/api/v2/album/empty!images"}},
+                }
+            },
+        },
+        "/api/v2/album/empty!images": {
+            "Code": 200,
+            "Response": {"AlbumImage": [], "Pages": {}},
         },
         "/api/v2/album/album-1!images": {
             "Code": 200,
@@ -204,12 +279,16 @@ def test_smugmug_source_loads_public_metadata_and_paginates() -> None:
     client = SmugMugApiClient("https://example.smugmug.com", "secret", transport)
     source = SmugMugSource("https://example.smugmug.com", "secret", client)
 
-    portfolio = load_portfolio(source)
+    with caplog.at_level(logging.INFO):
+        portfolio = load_portfolio(source)
 
     assert isinstance(source, GallerySource)
     assert portfolio.title == "Example Photographer"
     assert portfolio.source_id == "example"
-    assert portfolio.galleries[0].metadata["Description"] == "Portrait work"
+    assert [gallery.title for gallery in portfolio.galleries] == ["Empty", "People"]
+    assert portfolio.galleries[0].parent_source_id == "folder-1"
+    assert portfolio.galleries[0].placements == ()
+    assert portfolio.galleries[1].metadata["Description"] == "Portrait work"
     assert [asset.source_id for asset in portfolio.assets] == [
         "image-1",
         "image-2",
@@ -217,6 +296,15 @@ def test_smugmug_source_loads_public_metadata_and_paginates() -> None:
     ]
     assert portfolio.assets[0].preview_url is None
     assert portfolio.assets[2].media_type is MediaType.NON_PHOTO
+    assert "smugmug_gallery_discovery_completed" in caplog.messages
+    completed = next(
+        record
+        for record in caplog.records
+        if record.message == "smugmug_gallery_discovery_completed"
+    )
+    assert completed.folders_discovered == 1
+    assert completed.galleries_discovered == 2
+    assert completed.restricted_nodes_skipped == 1
     assert all(parse_qs(urlsplit(url).query)["APIKey"] == ["secret"] for url in transport.urls)
 
     asset = portfolio.assets[0]
@@ -228,6 +316,61 @@ def test_smugmug_source_loads_public_metadata_and_paginates() -> None:
         source.open_preview(asset),
     ):
         pass
+
+
+def test_smugmug_client_retries_transient_and_rate_limited_requests(caplog) -> None:
+    class RetryingTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_json(self, url):
+            self.calls += 1
+            if self.calls == 1:
+                raise SourceTransientError("temporary")
+            if self.calls == 2:
+                raise SourceRateLimitError(90)
+            return {"Code": 200, "Response": {"Value": "ready"}}
+
+    delays = []
+    transport = RetryingTransport()
+    client = SmugMugApiClient(
+        "https://example.smugmug.com",
+        "secret",
+        transport,
+        max_attempts=3,
+        max_retry_delay=5,
+        sleeper=delays.append,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        assert client.get_response("/resource") == {"Value": "ready"}
+
+    assert transport.calls == 3
+    assert delays == [1.0, 5]
+    assert caplog.messages.count("smugmug_request_retry") == 2
+
+
+def test_smugmug_client_stops_after_bounded_retries() -> None:
+    class FailingTransport:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_json(self, url):
+            self.calls += 1
+            raise SourceTransientError("still unavailable")
+
+    transport = FailingTransport()
+    client = SmugMugApiClient(
+        "https://example.smugmug.com",
+        "secret",
+        transport,
+        max_attempts=2,
+        sleeper=lambda _: None,
+    )
+
+    with pytest.raises(SourceTransientError, match="still unavailable"):
+        client.get_response("/resource")
+    assert transport.calls == 2
 
 
 def test_smugmug_client_rejects_repeated_pagination_link() -> None:
