@@ -174,6 +174,45 @@ recorded camera and lens models, focal-length ranges and exact values, apertures
 times, ISO ranges and exact values, and the most frequently recorded camera in each capture
 year. Distribution percentages use only photographs where that EXIF field is available.
 
+Generate the focal-length habits report:
+
+```console
+ppa report focal-length portfolio.sqlite3
+```
+
+The report compares usable native and 35 mm-equivalent coverage and selects one primary
+portfolio-wide basis deterministically: greater coverage wins, and a nonzero tie prefers
+35 mm equivalent. Native and equivalent measurements are never combined within one
+distribution. Lens summaries always use native focal length.
+
+Medians, minimums, maximums, and range classification use the unrounded normalized
+measurements. Repeated-value frequencies and distinct-value counts group measurements to
+the nearest whole millimeter using positive half-up rounding so small representation
+differences do not create false precision around commonly recorded values.
+
+Equivalent-based distributions use these inclusive-lower, exclusive-upper ranges:
+Ultra-wide `[0, 24)`, Wide `[24, 35)`, Normal `[35, 50)`, Short telephoto `[50, 85)`,
+Medium telephoto `[85, 200)`, and Super telephoto `[200, infinity)`. Native distributions
+use the same numeric boundaries with neutral labels rather than full-frame-equivalent
+category names.
+
+The default report limits camera and lens summaries to five each and galleries to ten.
+Default segments require at least 20 measured photographs; galleries also require at
+least 50% focal-length coverage. Every displayed segment includes its sample size and
+coverage. Request complete distributions or segment breakdowns independently:
+
+```console
+ppa report focal-length portfolio.sqlite3 --details
+ppa report focal-length portfolio.sqlite3 --camera-breakdown
+ppa report focal-length portfolio.sqlite3 --lens-breakdown
+ppa report focal-length portfolio.sqlite3 --gallery-breakdown
+ppa report focal-length portfolio.sqlite3 --year-breakdown
+```
+
+Flags can be combined without duplicating sections. Missing values remain missing; the
+report does not infer focal length from camera models, lens names, crop factors, field of
+view, filenames, or neighboring photographs.
+
 Generate a timeline report:
 
 ```console

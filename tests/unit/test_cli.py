@@ -88,6 +88,8 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
         AssetMetadata(
             MediaType.PHOTOGRAPH,
             values={"OriginalWidth": 3, "OriginalHeight": 2, "Format": "JPG"},
+            focal_length_mm=35,
+            focal_length_35mm=52.5,
         ),
     )
     portfolio = Portfolio(
@@ -141,6 +143,33 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
     assert "Detailed Timeline Distributions" in detailed_timeline_output
     assert "Camera Breakdown" in detailed_timeline_output
     assert "Gallery Breakdown" in detailed_timeline_output
+
+    assert main(["report", "focal-length", str(database)]) == 0
+    focal_output = capsys.readouterr().out
+    assert "Focal-length report: Example Portfolio" in focal_output
+    assert "Selected primary basis: 35 mm equivalent" in focal_output
+
+    assert (
+        main(
+            [
+                "report",
+                "focal-length",
+                str(database),
+                "--details",
+                "--camera-breakdown",
+                "--lens-breakdown",
+                "--gallery-breakdown",
+                "--year-breakdown",
+            ]
+        )
+        == 0
+    )
+    detailed_focal_output = capsys.readouterr().out
+    assert "Detailed Primary Distribution" in detailed_focal_output
+    assert "Camera Breakdown" in detailed_focal_output
+    assert "Lens Breakdown" in detailed_focal_output
+    assert "Gallery Breakdown" in detailed_focal_output
+    assert "Year Breakdown" in detailed_focal_output
 
 
 def test_enrich_exif_updates_saved_asset(monkeypatch, tmp_path, capsys) -> None:

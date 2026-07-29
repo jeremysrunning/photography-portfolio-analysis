@@ -194,3 +194,17 @@ and do not measure productivity or infer intent.
 The default text report summarizes deterministic timeline measurements, the five most
 represented recorded camera models, and the ten largest galleries. Complete global,
 camera, and gallery distributions remain available through independent CLI detail flags.
+
+## Focal-Length Analysis
+
+The focal-length analyzer reads only the normalized typed native and 35 mm-equivalent
+fields. It does not inspect provider EXIF keys or persistence tables. The field with
+greater usable portfolio coverage becomes the primary basis; a nonzero tie selects
+35 mm equivalent. One distribution never combines bases, and lens summaries independently
+use native measurements.
+
+Continuous measurements retain their normalized values for medians, limits, and range
+classification. Frequency buckets use deterministic whole-millimeter half-up grouping to
+avoid overstating small representation differences. Named photographic ranges apply only
+to 35 mm-equivalent measurements. Segment summaries disclose sample size and coverage,
+and the default report excludes small segments using documented thresholds.

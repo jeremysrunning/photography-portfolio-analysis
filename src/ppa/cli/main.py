@@ -7,10 +7,20 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from ppa import __version__
-from ppa.analysis import analyze_baseline, analyze_equipment, analyze_timeline
+from ppa.analysis import (
+    analyze_baseline,
+    analyze_equipment,
+    analyze_focal_lengths,
+    analyze_timeline,
+)
 from ppa.core.logging import configure_logging
 from ppa.models import Portfolio
-from ppa.reports import render_baseline, render_equipment, render_timeline
+from ppa.reports import (
+    render_baseline,
+    render_equipment,
+    render_focal_lengths,
+    render_timeline,
+)
 from ppa.sources import SourceError, SourceRateLimitError, load_portfolio
 from ppa.sources.smugmug import SmugMugApiClient, SmugMugExifEnricher, SmugMugSource
 from ppa.storage.sqlite import SQLitePortfolioRepository
@@ -59,6 +69,36 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measure equipment and exposure metadata patterns.",
     )
     _add_database_selection(equipment)
+    focal_length = report_commands.add_parser(
+        "focal-length",
+        help="Measure recorded focal-length use.",
+    )
+    _add_database_selection(focal_length)
+    focal_length.add_argument(
+        "--details",
+        action="store_true",
+        help="Include complete primary focal-length and range distributions.",
+    )
+    focal_length.add_argument(
+        "--camera-breakdown",
+        action="store_true",
+        help="Include complete per-camera focal-length measurements.",
+    )
+    focal_length.add_argument(
+        "--lens-breakdown",
+        action="store_true",
+        help="Include complete per-lens native focal-length measurements.",
+    )
+    focal_length.add_argument(
+        "--gallery-breakdown",
+        action="store_true",
+        help="Include complete per-gallery focal-length measurements.",
+    )
+    focal_length.add_argument(
+        "--year-breakdown",
+        action="store_true",
+        help="Include complete per-year focal-length measurements.",
+    )
     timeline = report_commands.add_parser(
         "timeline",
         help="Measure recorded capture dates and hours.",
@@ -151,6 +191,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if args.report_command == "equipment":
             print(render_equipment(analyze_equipment(portfolio)))
+            return 0
+        if args.report_command == "focal-length":
+            print(
+                render_focal_lengths(
+                    analyze_focal_lengths(portfolio),
+                    details=args.details,
+                    camera_breakdown=args.camera_breakdown,
+                    lens_breakdown=args.lens_breakdown,
+                    gallery_breakdown=args.gallery_breakdown,
+                    year_breakdown=args.year_breakdown,
+                )
+            )
             return 0
         if args.report_command == "timeline":
             print(

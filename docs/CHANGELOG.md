@@ -22,6 +22,9 @@ The format is intentionally simple. This project values documenting the evolutio
 - Typed native and 35 mm-equivalent focal-length metadata with evidence-based SmugMug
   normalization, SQLite schema version 5 persistence, migration backfill, and baseline
   coverage reporting.
+- Source-agnostic focal-length habits analysis with coverage-selected measurement basis,
+  deterministic whole-millimeter frequency grouping, practical equivalent ranges, camera,
+  native-lens, gallery, and yearly summaries, and optional CLI detail modes.
 - Initial project vision and documentation.
 - Project roadmap.
 - Guiding principles.
