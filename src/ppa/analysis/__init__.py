@@ -2,6 +2,14 @@
 
 from ppa.analysis.baseline import BaselineReport, Coverage, analyze_baseline
 from ppa.analysis.equipment import EquipmentReport, YearlyCamera, analyze_equipment
+from ppa.analysis.focal_length import (
+    FocalLengthBasis,
+    FocalLengthReport,
+    FocalLengthSegment,
+    FocalLengthSummary,
+    FocalLengthYearChange,
+    analyze_focal_lengths,
+)
 from ppa.analysis.timeline import (
     CameraEra,
     CaptureGap,
@@ -18,6 +26,11 @@ __all__ = [
     "CaptureGap",
     "Coverage",
     "EquipmentReport",
+    "FocalLengthBasis",
+    "FocalLengthReport",
+    "FocalLengthSegment",
+    "FocalLengthSummary",
+    "FocalLengthYearChange",
     "PeriodCount",
     "TimelineReport",
     "TimelineSegment",
@@ -25,5 +38,6 @@ __all__ = [
     "YearlyCamera",
     "analyze_baseline",
     "analyze_equipment",
+    "analyze_focal_lengths",
     "analyze_timeline",
 ]

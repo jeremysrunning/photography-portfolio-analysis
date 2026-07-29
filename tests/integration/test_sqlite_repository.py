@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from ppa.analysis import analyze_timeline
+from ppa.analysis import analyze_focal_lengths, analyze_timeline
 from ppa.models import (
     Asset,
     AssetMetadata,
@@ -386,8 +386,11 @@ def test_connection_closes_and_reports_operate_after_load(tmp_path) -> None:
 
     assert persisted is not None
     timeline = analyze_timeline(persisted)
+    focal_lengths = analyze_focal_lengths(persisted)
     assert timeline.photograph_count == 1
     assert timeline.capture_coverage.available == 1
+    assert focal_lengths.primary_summary is not None
+    assert focal_lengths.primary_summary.median_mm == 52.5
     moved = database.with_name("moved.sqlite3")
     database.rename(moved)
     assert moved.is_file()
