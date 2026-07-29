@@ -50,8 +50,7 @@ class EquipmentReport:
 
 def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
     """Measure equipment and exposure patterns from normalized EXIF."""
-    references = [asset for gallery in portfolio.galleries for asset in gallery.assets]
-    photographs = unique_photographs(references)
+    photographs = unique_photographs(list(portfolio.assets))
     total = len(photographs)
 
     cameras: Counter[str] = Counter()

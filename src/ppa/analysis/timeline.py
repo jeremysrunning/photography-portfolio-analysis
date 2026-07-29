@@ -98,8 +98,7 @@ class TimelineReport:
 
 def analyze_timeline(portfolio: Portfolio) -> TimelineReport:
     """Measure recorded capture dates and hours without inferring timezones."""
-    references = [asset for gallery in portfolio.galleries for asset in gallery.assets]
-    photographs = unique_photographs(references)
+    photographs = unique_photographs(list(portfolio.assets))
     captured = [asset for asset in photographs if asset.captured_at is not None]
     cameras = [asset for asset in photographs if camera_name(asset) is not None]
 
@@ -117,7 +116,7 @@ def analyze_timeline(portfolio: Portfolio) -> TimelineReport:
         _segment(
             gallery.source_id,
             gallery.title,
-            unique_photographs(list(gallery.assets)),
+            unique_photographs(list(portfolio.gallery_assets(gallery))),
         )
         for gallery in portfolio.galleries
     )

@@ -1,4 +1,12 @@
-from ppa.models import Asset, Gallery, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Gallery,
+    GalleryPlacement,
+    MediaType,
+    Portfolio,
+    SourceReference,
+)
 from ppa.sources import SourceRateLimitError
 from ppa.sources.smugmug import SmugMugExifEnricher
 from ppa.storage import SQLitePortfolioRepository
@@ -29,40 +37,35 @@ class FakeClient:
         }
 
 
-def test_exif_enrichment_is_incremental_and_skips_stored_video(tmp_path) -> None:
-    database = tmp_path / "portfolio.sqlite3"
-    portfolio = Portfolio(
-        source="smugmug",
-        source_id="example",
-        title="Example",
-        source_url="https://example.smugmug.com",
+def _portfolio(*assets: Asset) -> Portfolio:
+    return Portfolio(
+        "smugmug",
+        SourceReference("example", "https://example.smugmug.com"),
+        "Example",
+        assets=assets,
         galleries=(
             Gallery(
-                source_id="gallery",
-                title="Gallery",
-                source_url="https://example.smugmug.com/gallery",
-                assets=(
-                    Asset(
-                        source_id="photo-1",
-                        source_url="https://example.smugmug.com/i-photo-1",
-                        gallery_source_id="gallery",
-                        metadata={"ImageKey": "photo"},
-                    ),
-                    Asset(
-                        source_id="video-1",
-                        source_url="https://example.smugmug.com/i-video-1",
-                        gallery_source_id="gallery",
-                        metadata={"ImageKey": "video", "IsVideo": True, "Format": "MP4"},
-                    ),
-                    Asset(
-                        source_id="photo-2",
-                        source_url="https://example.smugmug.com/i-photo-2",
-                        gallery_source_id="gallery",
-                        metadata={"ImageKey": "photo-two"},
-                    ),
-                ),
+                SourceReference("gallery", "https://example.smugmug.com/gallery"),
+                "Gallery",
+                placements=tuple(GalleryPlacement(asset.source_id) for asset in assets),
             ),
         ),
+    )
+
+
+def _asset(source_id: str, media_type: MediaType = MediaType.PHOTOGRAPH) -> Asset:
+    return Asset(
+        SourceReference(source_id, f"https://example.smugmug.com/i-{source_id}"),
+        AssetMetadata(media_type, values={"ImageKey": source_id}),
+    )
+
+
+def test_exif_enrichment_is_incremental_and_skips_stored_video(tmp_path) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    portfolio = _portfolio(
+        _asset("photo-1"),
+        _asset("video-1", MediaType.NON_PHOTO),
+        _asset("photo-2"),
     )
     client = FakeClient()
 
@@ -83,33 +86,14 @@ def test_exif_enrichment_is_incremental_and_skips_stored_video(tmp_path) -> None
         enriched = repository.get("smugmug", "example")
 
     assert enriched is not None
-    assert enriched.galleries[0].assets[0].exif["Model"] == "Camera A"
-    assert enriched.galleries[0].assets[1].exif == {}
-    assert enriched.galleries[0].assets[2].exif["Model"] == "Camera B"
+    assert enriched.assets[0].exif["Model"] == "Camera A"
+    assert enriched.assets[1].exif["Model"] == "Camera B"
+    assert enriched.assets[2].exif == {}
 
 
 def test_failed_enrichment_is_only_selected_when_retrying(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
-    portfolio = Portfolio(
-        source="smugmug",
-        source_id="example",
-        title="Example",
-        source_url="https://example.smugmug.com",
-        galleries=(
-            Gallery(
-                source_id="gallery",
-                title="Gallery",
-                source_url="https://example.smugmug.com/gallery",
-                assets=(
-                    Asset(
-                        source_id="photo-1",
-                        source_url="https://example.smugmug.com/i-photo-1",
-                        gallery_source_id="gallery",
-                    ),
-                ),
-            ),
-        ),
-    )
+    portfolio = _portfolio(_asset("photo-1"))
 
     with SQLitePortfolioRepository(database) as repository:
         repository.save(portfolio)
@@ -138,26 +122,7 @@ def test_rate_limit_leaves_targets_pending(tmp_path) -> None:
             raise SourceRateLimitError(30)
 
     database = tmp_path / "portfolio.sqlite3"
-    portfolio = Portfolio(
-        source="smugmug",
-        source_id="example",
-        title="Example",
-        source_url="https://example.smugmug.com",
-        galleries=(
-            Gallery(
-                source_id="gallery",
-                title="Gallery",
-                source_url="https://example.smugmug.com/gallery",
-                assets=(
-                    Asset(
-                        source_id="photo-1",
-                        source_url="https://example.smugmug.com/i-photo-1",
-                        gallery_source_id="gallery",
-                    ),
-                ),
-            ),
-        ),
-    )
+    portfolio = _portfolio(_asset("photo-1"))
 
     with SQLitePortfolioRepository(database) as repository:
         repository.save(portfolio)

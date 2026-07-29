@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from ppa.models import JsonValue, Portfolio
+from ppa.models import JsonValue, MediaType, Portfolio
 
 
 @dataclass(frozen=True, slots=True)
@@ -11,6 +11,7 @@ class EnrichmentTarget:
     """A unique stored asset awaiting source metadata enrichment."""
 
     source_id: str
+    media_type: MediaType
     metadata: dict[str, JsonValue]
 
 

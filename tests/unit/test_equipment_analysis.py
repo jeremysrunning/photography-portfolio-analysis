@@ -1,19 +1,36 @@
 from datetime import UTC, datetime
 
 from ppa.analysis import analyze_equipment
-from ppa.models import Asset, Gallery, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Gallery,
+    GalleryPlacement,
+    MediaType,
+    Portfolio,
+    SourceReference,
+)
 from ppa.reports import render_equipment
+
+
+def _asset(source_id: str, captured_at, exif=None) -> Asset:
+    return Asset(
+        SourceReference(source_id, f"https://example.test/{source_id}"),
+        AssetMetadata(
+            MediaType.PHOTOGRAPH,
+            captured_at,
+            {"ImageKey": source_id},
+            exif or {},
+        ),
+    )
 
 
 def test_equipment_report_measures_available_exif_without_ranking_quality() -> None:
     assets = (
-        Asset(
-            source_id="one",
-            source_url="https://example.test/one",
-            gallery_source_id="gallery",
-            captured_at=datetime(2022, 1, 1, tzinfo=UTC),
-            metadata={"ImageKey": "one"},
-            exif={
+        _asset(
+            "one",
+            datetime(2022, 1, 1, tzinfo=UTC),
+            {
                 "Make": "Example",
                 "Model": "Camera A",
                 "Lens": "24-70mm",
@@ -23,13 +40,10 @@ def test_equipment_report_measures_available_exif_without_ranking_quality() -> N
                 "ISO": 400,
             },
         ),
-        Asset(
-            source_id="two",
-            source_url="https://example.test/two",
-            gallery_source_id="gallery",
-            captured_at=datetime(2022, 2, 1, tzinfo=UTC),
-            metadata={"ImageKey": "two"},
-            exif={
+        _asset(
+            "two",
+            datetime(2022, 2, 1, tzinfo=UTC),
+            {
                 "Make": "Example",
                 "Model": "Camera A",
                 "Lens": "70-200mm",
@@ -39,32 +53,23 @@ def test_equipment_report_measures_available_exif_without_ranking_quality() -> N
                 "ISO": 1600,
             },
         ),
-        Asset(
-            source_id="three",
-            source_url="https://example.test/three",
-            gallery_source_id="gallery",
-            captured_at=datetime(2023, 1, 1, tzinfo=UTC),
-            metadata={"ImageKey": "three"},
-            exif={"Make": "Other", "Model": "Other B"},
+        _asset(
+            "three",
+            datetime(2023, 1, 1, tzinfo=UTC),
+            {"Make": "Other", "Model": "Other B"},
         ),
-        Asset(
-            source_id="missing",
-            source_url="https://example.test/missing",
-            gallery_source_id="gallery",
-            metadata={"ImageKey": "missing"},
-        ),
+        _asset("missing", None),
     )
     portfolio = Portfolio(
-        source="test",
-        source_id="portfolio",
-        title="Equipment Evidence",
-        source_url="https://example.test",
+        "test",
+        SourceReference("portfolio", "https://example.test"),
+        "Equipment Evidence",
+        assets=assets,
         galleries=(
             Gallery(
-                source_id="gallery",
-                title="Gallery",
-                source_url="https://example.test/gallery",
-                assets=assets,
+                SourceReference("gallery", "https://example.test/gallery"),
+                "Gallery",
+                placements=tuple(GalleryPlacement(asset.source_id) for asset in assets),
             ),
         ),
     )

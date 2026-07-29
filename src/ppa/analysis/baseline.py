@@ -6,7 +6,7 @@ from datetime import datetime
 from statistics import median
 from typing import Any
 
-from ppa.analysis.assets import asset_value, text_value, unique_assets
+from ppa.analysis.assets import is_photograph, text_value
 from ppa.models import Asset, Portfolio
 
 
@@ -52,11 +52,15 @@ class BaselineReport:
 
 def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     """Measure metadata coverage and broad portfolio distributions."""
-    references = [asset for gallery in portfolio.galleries for asset in gallery.assets]
-    unique_media = unique_assets(references)
-    photographs = [asset for asset in unique_media if _is_photograph(asset)]
+    photographs = [asset for asset in portfolio.assets if is_photograph(asset)]
     total = len(photographs)
-    gallery_sizes = [len(gallery.assets) for gallery in portfolio.galleries]
+    reference_count = sum(len(gallery.placements) for gallery in portfolio.galleries)
+    placed_asset_ids = {
+        placement.asset_source_id
+        for gallery in portfolio.galleries
+        for placement in gallery.placements
+    }
+    gallery_sizes = [len(gallery.placements) for gallery in portfolio.galleries]
 
     captured = [asset.captured_at for asset in photographs if asset.captured_at is not None]
     orientations: Counter[str] = Counter()
@@ -104,11 +108,11 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     return BaselineReport(
         title=portfolio.title,
         gallery_count=len(portfolio.galleries),
-        media_references=len(references),
-        unique_media=len(unique_media),
+        media_references=reference_count,
+        unique_media=len(portfolio.assets),
         unique_photographs=total,
-        excluded_non_photographs=len(unique_media) - total,
-        duplicate_references=len(references) - len(unique_media),
+        excluded_non_photographs=len(portfolio.assets) - total,
+        duplicate_references=reference_count - len(placed_asset_ids),
         gallery_size_min=min(gallery_sizes, default=0),
         gallery_size_median=float(median(gallery_sizes)) if gallery_sizes else 0.0,
         gallery_size_max=max(gallery_sizes, default=0),
@@ -127,25 +131,13 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     )
 
 
-def _is_photograph(asset: Asset) -> bool:
-    if asset_value(asset, "IsVideo", "is_video") is True:
-        return False
-    image_format = _text(asset, "Format", "format")
-    return image_format is None or image_format.upper() not in {
-        "3GP",
-        "AVI",
-        "M4V",
-        "MOV",
-        "MP4",
-        "MPEG",
-        "MPG",
-        "WEBM",
-        "WMV",
-    }
-
-
 def _value(asset: Asset, *names: str) -> Any:
-    return asset_value(asset, *names)
+    for mapping in (asset.exif, asset.values):
+        for name in names:
+            value = mapping.get(name)
+            if value is not None:
+                return value
+    return None
 
 
 def _text(asset: Asset, *names: str) -> str | None:

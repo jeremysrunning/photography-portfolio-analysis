@@ -10,6 +10,13 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- Finalized normalized `SourceReference`, `AssetMetadata`, `MediaType`, and
+  `GalleryPlacement` models with validated unique-asset ownership and explicit placement
+  relationships.
+- Deeply immutable normalized metadata mappings with defensive copying of caller-owned
+  JSON-compatible structures.
+- SQLite schema version 4 with explicit media-type persistence and version-2/version-3
+  migration compatibility.
 - Initial project vision and documentation.
 - Project roadmap.
 - Guiding principles.
@@ -40,6 +47,10 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Changed
 
+- Aligned shared ingestion, SQLite loading, and analyzers on portfolio-owned unique assets
+  and gallery-owned ordered placements; unknown media is no longer treated as photography.
+- Counted additional gallery placements relative only to distinct placed assets, so
+  unplaced portfolio assets do not produce negative counts.
 - Expanded the `GallerySource` contract to cover discovery, gallery and asset enumeration,
   metadata enrichment, normalized failures, and source-owned temporary preview access.
 - Moved normalized portfolio composition from source adapters into a shared,

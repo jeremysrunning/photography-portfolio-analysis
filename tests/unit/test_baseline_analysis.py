@@ -1,62 +1,78 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from ppa.analysis import analyze_baseline
-from ppa.models import Asset, Gallery, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Gallery,
+    GalleryPlacement,
+    MediaType,
+    Portfolio,
+    SourceReference,
+)
 from ppa.reports import render_baseline
+
+
+def _reference(source_id: str) -> SourceReference:
+    return SourceReference(source_id, f"https://example.test/{source_id}")
 
 
 def test_baseline_distinguishes_references_and_unique_photographs() -> None:
     first = Asset(
-        source_id="image-1",
-        source_url="https://example.test/i/image-1",
-        gallery_source_id="gallery-1",
-        captured_at=datetime(2020, 1, 1, tzinfo=UTC),
-        metadata={
-            "ImageKey": "shared-image",
-            "OriginalWidth": 6000,
-            "OriginalHeight": 4000,
-            "Format": "JPG",
-            "Latitude": 45.0,
-            "Longitude": -122.0,
-            "Model": "Camera A",
-            "Lens": "Lens A",
-        },
-    )
-    placement = Asset(
-        source_id="image-1",
-        source_url="https://example.test/i/image-1",
-        gallery_source_id="gallery-2",
-        metadata={"ImageKey": "shared-image"},
+        _reference("image-1"),
+        AssetMetadata(
+            MediaType.PHOTOGRAPH,
+            datetime(2020, 1, 1, tzinfo=UTC),
+            {
+                "ImageKey": "shared-image",
+                "OriginalWidth": 6000,
+                "OriginalHeight": 4000,
+                "Format": "JPG",
+                "Latitude": 45.0,
+                "Longitude": -122.0,
+                "Model": "Camera A",
+                "Lens": "Lens A",
+            },
+        ),
     )
     portrait = Asset(
-        source_id="image-2",
-        source_url="https://example.test/i/image-2",
-        gallery_source_id="gallery-2",
-        metadata={
-            "ImageKey": "image-2",
-            "OriginalWidth": 3000,
-            "OriginalHeight": 4000,
-            "Format": "JPG",
-        },
+        _reference("image-2"),
+        AssetMetadata(
+            MediaType.PHOTOGRAPH,
+            values={
+                "ImageKey": "image-2",
+                "OriginalWidth": 3000,
+                "OriginalHeight": 4000,
+                "Format": "JPG",
+            },
+        ),
     )
     video = Asset(
-        source_id="video-1",
-        source_url="https://example.test/i/video-1",
-        gallery_source_id="gallery-2",
-        metadata={"ImageKey": "video-1", "Format": "MP4", "IsVideo": True},
+        _reference("video-1"),
+        AssetMetadata(
+            MediaType.NON_PHOTO,
+            values={"ImageKey": "video-1", "Format": "MP4", "IsVideo": True},
+        ),
     )
     portfolio = Portfolio(
-        source="test",
-        source_id="portfolio",
-        title="Portfolio",
-        source_url="https://example.test",
+        "test",
+        _reference("portfolio"),
+        "Portfolio",
+        assets=(first, portrait, video),
         galleries=(
-            Gallery("gallery-1", "One", "https://example.test/one", assets=(first,)),
             Gallery(
-                "gallery-2",
+                _reference("gallery-1"),
+                "One",
+                placements=(GalleryPlacement("image-1"),),
+            ),
+            Gallery(
+                _reference("gallery-2"),
                 "Two",
-                "https://example.test/two",
-                assets=(placement, portrait, video),
+                placements=tuple(
+                    GalleryPlacement(item) for item in ("image-1", "image-2", "video-1")
+                ),
             ),
         ),
     )
@@ -73,3 +89,42 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
     assert report.capture_date_coverage.available == 1
     assert report.geolocation_coverage.available == 1
     assert "Missing metadata is reported as missing" in render_baseline(report)
+
+
+@pytest.mark.parametrize(
+    ("gallery_assets", "expected"),
+    [
+        ((), 0),
+        (("placed",), 0),
+        (("placed", "placed"), 1),
+        (("placed", "second", "placed"), 1),
+    ],
+)
+def test_additional_placements_ignore_unplaced_assets(
+    gallery_assets: tuple[str, ...],
+    expected: int,
+) -> None:
+    assets = tuple(
+        Asset(
+            _reference(source_id),
+            AssetMetadata(MediaType.PHOTOGRAPH),
+        )
+        for source_id in ("placed", "second", "unplaced")
+    )
+    galleries = tuple(
+        Gallery(
+            _reference(f"gallery-{index}"),
+            f"Gallery {index}",
+            placements=(GalleryPlacement(source_id),),
+        )
+        for index, source_id in enumerate(gallery_assets)
+    )
+    portfolio = Portfolio(
+        "test",
+        _reference("portfolio"),
+        "Portfolio",
+        assets=assets,
+        galleries=galleries,
+    )
+
+    assert analyze_baseline(portfolio).duplicate_references == expected

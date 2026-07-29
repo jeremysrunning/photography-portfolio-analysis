@@ -108,25 +108,31 @@ The reusable engine lives in the `ppa` package and has no user-interface depende
 Portfolio, gallery, and asset identities are scoped by their source. The SQLite store
 persists source URLs and preview references, but never image bytes.
 
+The normalized portfolio owns each unique asset once. Galleries contain ordered
+`GalleryPlacement` references to those assets, so ingestion, persistence, and analyzers
+share the same object graph. `SourceReference` retains provider identifiers and URLs
+without exposing provider behavior, while explicit media types prevent unknown media
+from being treated as photographs.
+
 ## SQLite Persistence
 
 The ingestion boundary passes complete normalized `Portfolio` models to a source-agnostic
 repository. SQLite has no knowledge of SmugMug, and analyzers have no knowledge of the
 relational schema.
 
-Schema version 3 stores portfolios, galleries, and unique assets in explicit relational
+Schema version 4 stores portfolios, galleries, and unique assets in explicit relational
 tables. A gallery-placement table records the many-to-many relationship between galleries
 and assets, including stable placement order. Source identifiers and URLs are explicit
-columns; flexible normalized metadata, EXIF, measurements, observations, and findings use
-small JSON columns because their keys are intentionally extensible. No table accepts image
-bytes.
+columns, as are media type and optional capture timestamp. Flexible normalized metadata,
+EXIF, measurements, observations, and findings use small JSON columns because their keys
+are intentionally extensible. No table accepts image bytes.
 
 Saves transactionally upsert records by source-scoped identity. The first normalized
 occurrence of a repeated asset supplies its canonical fields, matching analyzer
 deduplication. Records missing from later crawls are retained unless a future explicit
 synchronization operation is introduced. Empty incoming EXIF or measurements do not erase
-previous enrichment. Version-2 databases migrate in place, and unsupported schema versions
-fail without being rewritten.
+previous enrichment. Version-2 and version-3 databases migrate in place, and unsupported
+schema versions fail without being rewritten.
 
 The SmugMug adapter uses the supported public API with an API key and no OAuth. It follows
 the site's user-to-albums-to-album-images links and API pagination. It does not call raw

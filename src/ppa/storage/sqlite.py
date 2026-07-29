@@ -2,16 +2,28 @@
 
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ppa.models import Asset, Finding, Gallery, JsonValue, Measurement, Observation, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Finding,
+    Gallery,
+    GalleryPlacement,
+    JsonValue,
+    Measurement,
+    MediaType,
+    Observation,
+    Portfolio,
+    SourceReference,
+)
 from ppa.storage.base import EnrichmentStatus, EnrichmentTarget
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 _SCHEMA_STATEMENTS = (
     """
@@ -55,6 +67,9 @@ _SCHEMA_STATEMENTS = (
         source_url TEXT NOT NULL,
         preview_url TEXT,
         captured_at TEXT,
+        media_type TEXT NOT NULL CHECK (
+            media_type IN ('photograph', 'non_photo', 'unknown')
+        ),
         metadata_json TEXT NOT NULL,
         exif_json TEXT NOT NULL,
         measurements_json TEXT NOT NULL,
@@ -160,9 +175,14 @@ class SQLitePortfolioRepository:
                     "INSERT INTO schema_metadata (key, value) VALUES ('version', ?)",
                     (str(SCHEMA_VERSION),),
                 )
-        elif current_version == 2:
+            current_version = SCHEMA_VERSION
+        if current_version == 2:
             self._migrate_v2_to_v3(connection)
-        elif current_version != SCHEMA_VERSION:
+            current_version = 4
+        if current_version == 3:
+            self._migrate_v3_to_v4(connection)
+            current_version = 4
+        if current_version != SCHEMA_VERSION:
             raise UnsupportedSchemaVersionError(
                 f"Unsupported SQLite schema version {current_version}; "
                 f"this release supports version {SCHEMA_VERSION}."
@@ -173,7 +193,7 @@ class SQLitePortfolioRepository:
         """Upsert a normalized portfolio without deleting previously seen records."""
         self.initialize()
         with self._transaction() as connection:
-            key = (portfolio.source, portfolio.source_id)
+            key = (portfolio.source_name, portfolio.source_id)
             connection.execute(
                 """
                 INSERT INTO portfolios (
@@ -210,25 +230,19 @@ class SQLitePortfolioRepository:
                     ),
                 ),
             )
-            canonical_assets: dict[str, Asset] = {}
-            placements: list[tuple[str, str, int]] = []
             for gallery_position, gallery in enumerate(portfolio.galleries):
                 self._upsert_gallery(connection, key, gallery, gallery_position)
-                for asset_position, asset in enumerate(gallery.assets):
-                    if asset.gallery_source_id != gallery.source_id:
-                        raise ValueError("asset gallery_source_id does not match its gallery")
-                    canonical_assets.setdefault(asset.source_id, asset)
-                    placements.append((gallery.source_id, asset.source_id, asset_position))
-            for asset in canonical_assets.values():
+            for asset in portfolio.assets:
                 self._upsert_asset(connection, key, asset)
-            for gallery_source_id, asset_source_id, position in placements:
-                self._upsert_placement(
-                    connection,
-                    key,
-                    gallery_source_id,
-                    asset_source_id,
-                    position,
-                )
+            for gallery in portfolio.galleries:
+                for position, placement in enumerate(gallery.placements):
+                    self._upsert_placement(
+                        connection,
+                        key,
+                        gallery.source_id,
+                        placement.asset_source_id,
+                        position,
+                    )
 
     def get(self, source: str, source_id: str) -> Portfolio | None:
         """Load a complete normalized portfolio by source-scoped identity."""
@@ -240,6 +254,14 @@ class SQLitePortfolioRepository:
         ).fetchone()
         if row is None:
             return None
+        asset_rows = connection.execute(
+            """
+            SELECT * FROM assets
+            WHERE source = ? AND portfolio_source_id = ?
+            ORDER BY source_id
+            """,
+            (source, source_id),
+        ).fetchall()
         gallery_rows = connection.execute(
             """
             SELECT * FROM galleries
@@ -260,11 +282,11 @@ class SQLitePortfolioRepository:
             for item in json.loads(row["findings_json"])
         )
         return Portfolio(
-            source=row["source"],
-            source_id=row["source_id"],
+            source_name=row["source"],
+            source=SourceReference(row["source_id"], row["source_url"]),
             title=row["title"],
-            source_url=row["source_url"],
             metadata=json.loads(row["metadata_json"]),
+            assets=tuple(self._read_asset(item) for item in asset_rows),
             galleries=galleries,
             observations=observations,
             findings=findings,
@@ -315,7 +337,7 @@ class SQLitePortfolioRepository:
             parameters.append(limit)
         rows = self._connect().execute(
             f"""
-            SELECT assets.source_id, assets.metadata_json
+            SELECT assets.source_id, assets.media_type, assets.metadata_json
             FROM assets
             LEFT JOIN asset_enrichments AS enrichment
               ON enrichment.source = assets.source
@@ -331,7 +353,12 @@ class SQLitePortfolioRepository:
             parameters,
         )
         return tuple(
-            EnrichmentTarget(row["source_id"], json.loads(row["metadata_json"])) for row in rows
+            EnrichmentTarget(
+                row["source_id"],
+                MediaType(row["media_type"]),
+                json.loads(row["metadata_json"]),
+            )
+            for row in rows
         )
 
     def save_asset_enrichment(
@@ -460,12 +487,13 @@ class SQLitePortfolioRepository:
             """
             INSERT INTO assets (
                 source, portfolio_source_id, source_id, source_url, preview_url,
-                captured_at, metadata_json, exif_json, measurements_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                captured_at, media_type, metadata_json, exif_json, measurements_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (source, portfolio_source_id, source_id) DO UPDATE SET
                 source_url = excluded.source_url,
                 preview_url = excluded.preview_url,
                 captured_at = excluded.captured_at,
+                media_type = excluded.media_type,
                 metadata_json = excluded.metadata_json,
                 exif_json = CASE
                     WHEN excluded.exif_json = '{}' THEN assets.exif_json
@@ -482,7 +510,8 @@ class SQLitePortfolioRepository:
                 asset.source_url,
                 asset.preview_url,
                 asset.captured_at.isoformat() if asset.captured_at else None,
-                _json(asset.metadata),
+                asset.media_type.value,
+                _json(asset.values),
                 _json(asset.exif),
                 _json(
                     [
@@ -560,51 +589,47 @@ class SQLitePortfolioRepository:
         portfolio_source_id: str,
         row: sqlite3.Row,
     ) -> Gallery:
-        asset_rows = connection.execute(
+        placement_rows = connection.execute(
             """
-            SELECT assets.*, placements.position AS placement_position
+            SELECT asset_source_id
             FROM gallery_placements AS placements
-            JOIN assets
-              ON assets.source = placements.source
-             AND assets.portfolio_source_id = placements.portfolio_source_id
-             AND assets.source_id = placements.asset_source_id
             WHERE placements.source = ?
               AND placements.portfolio_source_id = ?
               AND placements.gallery_source_id = ?
-            ORDER BY placements.position, assets.source_id
+            ORDER BY placements.position, placements.asset_source_id
             """,
             (source, portfolio_source_id, row["source_id"]),
         ).fetchall()
-        assets = tuple(
-            Asset(
-                source_id=item["source_id"],
-                source_url=item["source_url"],
-                gallery_source_id=row["source_id"],
-                preview_url=item["preview_url"],
-                captured_at=(
-                    datetime.fromisoformat(item["captured_at"]) if item["captured_at"] else None
-                ),
-                metadata=json.loads(item["metadata_json"]),
-                exif=json.loads(item["exif_json"]),
-                measurements=tuple(
-                    Measurement(
-                        measurement["name"],
-                        measurement["value"],
-                        measurement["unit"],
-                        measurement["method"],
-                    )
-                    for measurement in json.loads(item["measurements_json"])
-                ),
-            )
-            for item in asset_rows
-        )
         return Gallery(
-            source_id=row["source_id"],
+            source=SourceReference(row["source_id"], row["source_url"]),
             title=row["title"],
-            source_url=row["source_url"],
             parent_source_id=row["parent_source_id"],
             metadata=json.loads(row["metadata_json"]),
-            assets=assets,
+            placements=tuple(GalleryPlacement(item["asset_source_id"]) for item in placement_rows),
+        )
+
+    @staticmethod
+    def _read_asset(row: sqlite3.Row) -> Asset:
+        return Asset(
+            source=SourceReference(row["source_id"], row["source_url"]),
+            preview_url=row["preview_url"],
+            metadata=AssetMetadata(
+                media_type=MediaType(row["media_type"]),
+                captured_at=(
+                    datetime.fromisoformat(row["captured_at"]) if row["captured_at"] else None
+                ),
+                values=json.loads(row["metadata_json"]),
+                exif=json.loads(row["exif_json"]),
+            ),
+            measurements=tuple(
+                Measurement(
+                    measurement["name"],
+                    measurement["value"],
+                    measurement["unit"],
+                    measurement["method"],
+                )
+                for measurement in json.loads(row["measurements_json"])
+            ),
         )
 
     @staticmethod
@@ -645,7 +670,7 @@ class SQLitePortfolioRepository:
                 """
                 INSERT OR IGNORE INTO assets (
                     source, portfolio_source_id, source_id, source_url,
-                    preview_url, captured_at, metadata_json, exif_json,
+                    preview_url, captured_at, media_type, metadata_json, exif_json,
                     measurements_json
                 )
                 SELECT
@@ -655,6 +680,7 @@ class SQLitePortfolioRepository:
                     legacy.source_url,
                     legacy.preview_url,
                     legacy.captured_at,
+                    'unknown',
                     legacy.metadata_json,
                     legacy.exif_json,
                     legacy.measurements_json
@@ -702,11 +728,89 @@ class SQLitePortfolioRepository:
             )
             connection.execute("DROP TABLE asset_enrichments_v2")
             connection.execute("DROP TABLE assets_v2")
+            self._backfill_media_types(connection)
             connection.execute(
                 "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
                 (str(SCHEMA_VERSION),),
             )
 
+    @staticmethod
+    def _migrate_v3_to_v4(connection: sqlite3.Connection) -> None:
+        with connection:
+            connection.execute(
+                "ALTER TABLE assets ADD COLUMN media_type TEXT NOT NULL DEFAULT 'unknown'"
+            )
+            SQLitePortfolioRepository._backfill_media_types(connection)
+            connection.execute(
+                "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
+                (str(SCHEMA_VERSION),),
+            )
+
+    @staticmethod
+    def _backfill_media_types(connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            "SELECT source, portfolio_source_id, source_id, metadata_json FROM assets"
+        ).fetchall()
+        for row in rows:
+            media_type = _legacy_media_type(json.loads(row["metadata_json"]))
+            connection.execute(
+                """
+                UPDATE assets SET media_type = ?
+                WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
+                """,
+                (
+                    media_type.value,
+                    row["source"],
+                    row["portfolio_source_id"],
+                    row["source_id"],
+                ),
+            )
+
 
 def _json(value: Any) -> str:
-    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+    return json.dumps(_mutable_json(value), separators=(",", ":"), sort_keys=True)
+
+
+def _mutable_json(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _mutable_json(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_mutable_json(item) for item in value]
+    return value
+
+
+def _legacy_media_type(metadata: dict[str, JsonValue]) -> MediaType:
+    if metadata.get("IsVideo") is True:
+        return MediaType.NON_PHOTO
+    if metadata.get("IsVideo") is False:
+        return MediaType.PHOTOGRAPH
+    image_format = metadata.get("Format")
+    if isinstance(image_format, str):
+        normalized = image_format.upper()
+        if normalized in {
+            "3GP",
+            "AVI",
+            "M4V",
+            "MOV",
+            "MP4",
+            "MPEG",
+            "MPG",
+            "WEBM",
+            "WMV",
+        }:
+            return MediaType.NON_PHOTO
+        if normalized in {
+            "AVIF",
+            "BMP",
+            "GIF",
+            "HEIC",
+            "HEIF",
+            "JPEG",
+            "JPG",
+            "PNG",
+            "TIF",
+            "TIFF",
+            "WEBP",
+        }:
+            return MediaType.PHOTOGRAPH
+    return MediaType.UNKNOWN

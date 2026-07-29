@@ -1,7 +1,15 @@
 from datetime import UTC, datetime, timedelta, timezone
 
 from ppa.analysis import analyze_timeline
-from ppa.models import Asset, Gallery, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Gallery,
+    GalleryPlacement,
+    MediaType,
+    Portfolio,
+    SourceReference,
+)
 from ppa.reports import render_timeline
 
 
@@ -9,32 +17,31 @@ def _asset(
     source_id: str,
     captured_at: datetime | None,
     *,
-    gallery_id: str = "gallery",
     camera: str | None = None,
 ) -> Asset:
     exif = {"Model": camera} if camera else {}
     return Asset(
-        source_id=source_id,
-        source_url=f"https://example.test/{source_id}",
-        gallery_source_id=gallery_id,
-        captured_at=captured_at,
-        metadata={"ImageKey": source_id},
-        exif=exif,
+        SourceReference(source_id, f"https://example.test/{source_id}"),
+        AssetMetadata(
+            MediaType.PHOTOGRAPH,
+            captured_at,
+            {"ImageKey": source_id},
+            exif,
+        ),
     )
 
 
 def _portfolio(assets: tuple[Asset, ...], title: str = "Timeline Evidence") -> Portfolio:
     return Portfolio(
-        source="test",
-        source_id="portfolio",
-        title=title,
-        source_url="https://example.test",
+        "test",
+        SourceReference("portfolio", "https://example.test"),
+        title,
+        assets=assets,
         galleries=(
             Gallery(
-                source_id="gallery",
-                title="Gallery",
-                source_url="https://example.test/gallery",
-                assets=assets,
+                SourceReference("gallery", "https://example.test/gallery"),
+                "Gallery",
+                placements=tuple(GalleryPlacement(asset.source_id) for asset in assets),
             ),
         ),
     )
@@ -108,28 +115,32 @@ def test_default_report_is_concise_neutral_and_measurement_driven() -> None:
 
 
 def test_top_galleries_are_limited_and_deterministically_ordered() -> None:
+    gallery_assets = tuple(
+        tuple(
+            _asset(
+                f"g{index:02d}-{asset_index:02d}",
+                datetime(2024, 1, index, tzinfo=UTC),
+                camera="Camera",
+            )
+            for asset_index in range(index)
+        )
+        for index in range(1, 13)
+    )
     galleries = tuple(
         Gallery(
-            source_id=f"g{index:02d}",
-            title=f"Gallery {index:02d}",
-            source_url=f"https://example.test/g{index:02d}",
-            assets=tuple(
-                _asset(
-                    f"g{index:02d}-{asset_index:02d}",
-                    datetime(2024, 1, index, tzinfo=UTC),
-                    gallery_id=f"g{index:02d}",
-                    camera="Camera",
-                )
-                for asset_index in range(index)
+            SourceReference(f"g{index:02d}", f"https://example.test/g{index:02d}"),
+            f"Gallery {index:02d}",
+            placements=tuple(
+                GalleryPlacement(asset.source_id) for asset in gallery_assets[index - 1]
             ),
         )
         for index in range(1, 13)
     )
     portfolio = Portfolio(
         "test",
-        "portfolio",
+        SourceReference("portfolio", "https://example.test"),
         "Gallery Ranking",
-        "https://example.test",
+        assets=tuple(asset for group in gallery_assets for asset in group),
         galleries=galleries,
     )
 
@@ -172,20 +183,24 @@ def test_ties_use_earliest_period_and_stable_names() -> None:
 
     tied_galleries = (
         Gallery(
-            "zulu",
+            SourceReference("zulu", "https://example.test/zulu"),
             "Zulu",
-            "https://example.test/zulu",
-            assets=(_asset("zulu", assets[0].captured_at, gallery_id="zulu"),),
+            placements=(GalleryPlacement("a-2020"),),
         ),
         Gallery(
-            "alpha",
+            SourceReference("alpha", "https://example.test/alpha"),
             "Alpha",
-            "https://example.test/alpha",
-            assets=(_asset("alpha", assets[1].captured_at, gallery_id="alpha"),),
+            placements=(GalleryPlacement("b-2021"),),
         ),
     )
     gallery_report = analyze_timeline(
-        Portfolio("test", "ties", "Ties", "https://example.test", galleries=tied_galleries)
+        Portfolio(
+            "test",
+            SourceReference("ties", "https://example.test"),
+            "Ties",
+            assets=assets,
+            galleries=tied_galleries,
+        )
     )
     assert [segment.key for segment in gallery_report.top_galleries] == ["alpha", "zulu"]
 
@@ -250,7 +265,11 @@ def test_missing_metadata_and_empty_portfolios_remain_explicit() -> None:
     missing_report = analyze_timeline(_portfolio((_asset("missing", None),), "Missing Timeline"))
     missing_rendered = render_timeline(missing_report)
     empty_report = analyze_timeline(
-        Portfolio("test", "empty", "Empty Timeline", "https://example.test")
+        Portfolio(
+            "test",
+            SourceReference("empty", "https://example.test"),
+            "Empty Timeline",
+        )
     )
     empty_rendered = render_timeline(empty_report)
 

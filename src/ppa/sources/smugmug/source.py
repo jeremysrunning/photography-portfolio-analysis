@@ -9,7 +9,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from ppa.models import Asset, Gallery, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Gallery,
+    MediaType,
+    Portfolio,
+    SourceReference,
+)
 from ppa.sources.base import (
     SourceAuthenticationError,
     SourceError,
@@ -37,20 +44,22 @@ class SmugMugSource:
         user = _object(site_user, "User")
         nickname = _required_string(user, "NickName")
         return Portfolio(
-            source=self.source_name,
-            source_id=nickname,
-            title=_string(user, "Name") or nickname,
-            source_url=_absolute_web_url(
-                _string(user, "WebUri") or self.portfolio_url, self.portfolio_url
+            source_name=self.source_name,
+            source=SourceReference(
+                nickname,
+                _absolute_web_url(
+                    _string(user, "WebUri") or self.portfolio_url, self.portfolio_url
+                ),
             ),
+            title=_string(user, "Name") or nickname,
             metadata=_metadata(user, {"Name", "NickName", "Uri", "Uris", "WebUri"}),
         )
 
     def iter_galleries(self, portfolio: Portfolio) -> Iterator[Gallery]:
         """Yield public SmugMug albums as normalized galleries."""
-        if portfolio.source != self.source_name:
+        if portfolio.source_name != self.source_name:
             raise SourceError(
-                f"Cannot enumerate {portfolio.source!r} with the {self.source_name!r} source."
+                f"Cannot enumerate {portfolio.source_name!r} with the {self.source_name!r} source."
             )
         client = self.client or SmugMugApiClient(self.portfolio_url, self.api_key)
         albums_uri = f"/api/v2/user/{portfolio.source_id}!albums"
@@ -62,8 +71,7 @@ class SmugMugSource:
         client = self.client or SmugMugApiClient(self.portfolio_url, self.api_key)
         images_uri = f"/api/v2/album/{gallery.source_id}!images"
         for image in client.iter_objects(images_uri, "AlbumImage"):
-            if image.get("IsVideo") is not True:
-                yield _asset(image, gallery.source_id, self.portfolio_url)
+            yield _asset(image, self.portfolio_url)
 
     def enrich_asset_metadata(self, asset: Asset) -> Asset:
         """Return an asset enriched with available public SmugMug metadata."""
@@ -74,7 +82,10 @@ class SmugMugSource:
             metadata,
             {"Uri", "Uris", "ResponseLevel", "UriDescription"},
         )
-        return replace(asset, exif={**asset.exif, **exif})
+        return replace(
+            asset,
+            metadata=replace(asset.metadata, exif={**asset.exif, **exif}),
+        )
 
     @contextmanager
     def open_preview(self, asset: Asset) -> Iterator[BinaryIO]:
@@ -106,9 +117,11 @@ class SmugMugSource:
     def _gallery(self, album: dict[str, Any]) -> Gallery:
         album_id = _resource_id(_required_string(album, "Uri"))
         return Gallery(
-            source_id=album_id,
+            source=SourceReference(
+                album_id,
+                _absolute_web_url(_required_string(album, "WebUri"), self.portfolio_url),
+            ),
             title=_string(album, "Name") or album_id,
-            source_url=_absolute_web_url(_required_string(album, "WebUri"), self.portfolio_url),
             metadata=_metadata(
                 album,
                 {"Name", "Uri", "Uris", "WebUri"},
@@ -116,17 +129,29 @@ class SmugMugSource:
         )
 
 
-def _asset(image: dict[str, Any], gallery_id: str, site_url: str) -> Asset:
+def _asset(image: dict[str, Any], site_url: str) -> Asset:
     uri = _required_string(image, "Uri")
     captured_at = _datetime(image.get("DateTimeOriginal") or image.get("Date"))
+    is_video = image.get("IsVideo")
+    media_type = (
+        MediaType.NON_PHOTO
+        if is_video is True
+        else MediaType.PHOTOGRAPH
+        if is_video is False
+        else MediaType.UNKNOWN
+    )
     return Asset(
-        source_id=_resource_id(uri),
-        source_url=_absolute_web_url(_required_string(image, "WebUri"), site_url),
-        gallery_source_id=gallery_id,
-        captured_at=captured_at,
-        metadata=_metadata(
-            image,
-            {"Uri", "Uris", "WebUri", "DateTimeOriginal"},
+        source=SourceReference(
+            _resource_id(uri),
+            _absolute_web_url(_required_string(image, "WebUri"), site_url),
+        ),
+        metadata=AssetMetadata(
+            media_type=media_type,
+            captured_at=captured_at,
+            values=_metadata(
+                image,
+                {"Uri", "Uris", "WebUri", "DateTimeOriginal"},
+            ),
         ),
     )
 

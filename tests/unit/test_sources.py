@@ -7,7 +7,14 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from ppa.models import Asset, Gallery, Portfolio
+from ppa.models import (
+    Asset,
+    AssetMetadata,
+    Gallery,
+    MediaType,
+    Portfolio,
+    SourceReference,
+)
 from ppa.sources import (
     GallerySource,
     SourceError,
@@ -41,22 +48,31 @@ class FakeGallerySource:
         self.preview_stream: BytesIO | None = None
 
     def discover_portfolio(self) -> Portfolio:
-        return Portfolio("fake", "portfolio", "Fake portfolio", "https://example.test")
+        return Portfolio(
+            "fake",
+            SourceReference("portfolio", "https://example.test"),
+            "Fake portfolio",
+        )
 
     def iter_galleries(self, portfolio: Portfolio) -> Iterator[Gallery]:
-        assert portfolio.source == self.source_name
-        yield Gallery("gallery", "Fake gallery", "https://example.test/gallery")
+        assert portfolio.source_name == self.source_name
+        yield Gallery(
+            SourceReference("gallery", "https://example.test/gallery"),
+            "Fake gallery",
+        )
 
     def iter_assets(self, gallery: Gallery) -> Iterator[Asset]:
         yield Asset(
-            "asset",
-            "https://example.test/asset",
-            gallery.source_id,
+            SourceReference("asset", "https://example.test/asset"),
+            AssetMetadata(MediaType.PHOTOGRAPH),
             preview_url="https://example.test/preview.jpg",
         )
 
     def enrich_asset_metadata(self, asset: Asset) -> Asset:
-        return replace(asset, exif={**asset.exif, "Model": "Fake camera"})
+        return replace(
+            asset,
+            metadata=replace(asset.metadata, exif={**asset.exif, "Model": "Fake camera"}),
+        )
 
     @contextmanager
     def open_preview(self, asset: Asset) -> Iterator[BinaryIO]:
@@ -84,7 +100,8 @@ def test_fake_source_exercises_complete_gallery_source_contract() -> None:
     assert source.preview_stream.closed
 
     loaded = load_portfolio(source)
-    assert loaded.galleries[0].assets == (asset,)
+    assert loaded.assets == (asset,)
+    assert loaded.gallery_assets(loaded.galleries[0]) == (asset,)
 
 
 def test_shared_loader_preserves_source_exceptions() -> None:
@@ -102,7 +119,7 @@ def test_shared_loader_preserves_source_exceptions() -> None:
 
 def test_fake_source_normalizes_unavailable_preview() -> None:
     source = FakeGallerySource()
-    asset = Asset("missing", "https://example.test/missing", "gallery")
+    asset = Asset(SourceReference("missing", "https://example.test/missing"))
 
     with (
         pytest.raises(SourcePreviewUnavailableError, match="unavailable"),
@@ -193,14 +210,16 @@ def test_smugmug_source_loads_public_metadata_and_paginates() -> None:
     assert portfolio.title == "Example Photographer"
     assert portfolio.source_id == "example"
     assert portfolio.galleries[0].metadata["Description"] == "Portrait work"
-    assert [asset.source_id for asset in portfolio.galleries[0].assets] == [
+    assert [asset.source_id for asset in portfolio.assets] == [
         "image-1",
         "image-2",
+        "video-1",
     ]
-    assert portfolio.galleries[0].assets[0].preview_url is None
+    assert portfolio.assets[0].preview_url is None
+    assert portfolio.assets[2].media_type is MediaType.NON_PHOTO
     assert all(parse_qs(urlsplit(url).query)["APIKey"] == ["secret"] for url in transport.urls)
 
-    asset = portfolio.galleries[0].assets[0]
+    asset = portfolio.assets[0]
     enriched = source.enrich_asset_metadata(asset)
     assert asset.exif == {}
     assert enriched.exif == {"Model": "Camera A"}

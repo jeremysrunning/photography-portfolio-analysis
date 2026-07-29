@@ -173,9 +173,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("--limit must be greater than zero")
         try:
             portfolio = _load_stored_portfolio(args.database, args.source, args.source_id)
-            if portfolio.source != "smugmug":
+            if portfolio.source_name != "smugmug":
                 raise SourceError(
-                    f"EXIF enrichment is not implemented for source: {portfolio.source}"
+                    f"EXIF enrichment is not implemented for source: {portfolio.source_name}"
                 )
             return _enrich_exif(portfolio, args)
         except SourceRateLimitError as error:
@@ -192,13 +192,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _print_summary(portfolio: Portfolio) -> None:
-    asset_count = sum(len(gallery.assets) for gallery in portfolio.galleries)
+    asset_count = sum(len(gallery.placements) for gallery in portfolio.galleries)
     print(f"Portfolio: {portfolio.title}")
     print(f"Source ID: {portfolio.source_id}")
     print(f"Galleries: {len(portfolio.galleries)}")
     print(f"Photograph references: {asset_count}")
     for gallery in portfolio.galleries:
-        print(f"  {gallery.title}: {len(gallery.assets)}")
+        print(f"  {gallery.title}: {len(gallery.placements)}")
 
 
 def _add_database_selection(parser: argparse.ArgumentParser) -> None:
@@ -241,7 +241,7 @@ def _load_stored_portfolio(
 def _print_stored_portfolio(portfolio: Portfolio) -> None:
     baseline = analyze_baseline(portfolio)
     print(f"Portfolio: {portfolio.title}")
-    print(f"Source: {portfolio.source}")
+    print(f"Source: {portfolio.source_name}")
     print(f"Source ID: {portfolio.source_id}")
     print(f"Source URL: {portfolio.source_url}")
     print(f"Galleries: {baseline.gallery_count:,}")
@@ -255,12 +255,12 @@ def _print_stored_portfolio(portfolio: Portfolio) -> None:
 def _enrich_exif(portfolio: Portfolio, args: argparse.Namespace) -> int:
     with SQLitePortfolioRepository(args.database) as repository:
         before = repository.enrichment_status(
-            portfolio.source,
+            portfolio.source_name,
             portfolio.source_id,
             "exif",
         )
         targets = repository.list_enrichment_targets(
-            portfolio.source,
+            portfolio.source_name,
             portfolio.source_id,
             "exif",
             retry_failed=args.retry_failed,
@@ -288,13 +288,13 @@ def _enrich_exif(portfolio: Portfolio, args: argparse.Namespace) -> int:
                 print(f"Processed {processed:,} / {total:,} ({failed:,} failed)")
 
         result = enricher.enrich(
-            portfolio.source,
+            portfolio.source_name,
             portfolio.source_id,
             targets,
             show_progress,
         )
         after = repository.enrichment_status(
-            portfolio.source,
+            portfolio.source_name,
             portfolio.source_id,
             "exif",
         )
