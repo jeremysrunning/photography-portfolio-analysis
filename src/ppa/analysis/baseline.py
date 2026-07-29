@@ -48,6 +48,8 @@ class BaselineReport:
     cameras: dict[str, int]
     lens_coverage: Coverage
     lenses: dict[str, int]
+    focal_length_coverage: Coverage
+    focal_length_35mm_coverage: Coverage
 
 
 def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
@@ -72,6 +74,8 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     geolocation_count = 0
     camera_count = 0
     lens_count = 0
+    focal_length_count = 0
+    focal_length_35mm_count = 0
 
     for asset in photographs:
         width = _positive_number(asset, "OriginalWidth", "width", "Width")
@@ -104,6 +108,10 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
         if lens:
             lens_count += 1
             lenses[lens] += 1
+        if asset.metadata.focal_length_mm is not None:
+            focal_length_count += 1
+        if asset.metadata.focal_length_35mm is not None:
+            focal_length_35mm_count += 1
 
     return BaselineReport(
         title=portfolio.title,
@@ -128,6 +136,8 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
         cameras=dict(cameras.most_common()),
         lens_coverage=Coverage(lens_count, total),
         lenses=dict(lenses.most_common()),
+        focal_length_coverage=Coverage(focal_length_count, total),
+        focal_length_35mm_coverage=Coverage(focal_length_35mm_count, total),
     )
 
 

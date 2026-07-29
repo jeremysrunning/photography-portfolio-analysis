@@ -74,7 +74,7 @@ def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
         if lens:
             lenses[lens] += 1
 
-        focal = _number(asset, "FocalLength", "focal_length")
+        focal = asset.metadata.focal_length_mm
         if focal is not None:
             focal_lengths[_measurement(focal, "mm")] += 1
             focal_ranges[_focal_range(focal)] += 1

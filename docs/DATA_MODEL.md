@@ -83,6 +83,7 @@ the normalized model and are never persisted.
 
 - an explicit `MediaType`
 - an optional capture timestamp
+- optional normalized native and 35 mm-equivalent focal lengths in millimeters
 - JSON-compatible normalized source values
 - JSON-compatible EXIF values
 
@@ -95,6 +96,14 @@ mappings can mutate normalized model state afterward.
 
 Capture timestamps preserve their recorded timezone information. Naive timestamps remain
 timezone-unknown; the model does not infer a timezone.
+
+Native focal length and 35 mm-equivalent focal length are independent, positive finite
+numeric fields. They contain only measurements explicitly reported by the source. Integer,
+decimal, and rational EXIF representations are normalized to millimeters. Missing,
+zero, negative, non-finite, and malformed values remain `None`; one focal-length field is
+never derived from the other. Reported teleconverter-adjusted focal lengths are preserved
+without attempting to identify an underlying lens or infer a crop factor. The original
+source representation remains available in the immutable EXIF mapping.
 
 ## MediaType
 
@@ -117,19 +126,20 @@ introduce a validation framework.
 
 ## Persistence Round Trips
 
-SQLite schema version 4 mirrors the normalized graph:
+SQLite schema version 5 mirrors the normalized graph:
 
 - portfolios and source references use explicit columns
 - galleries are stored independently from assets
 - assets are unique by source-scoped portfolio identity
 - gallery placements preserve the many-to-many relationship and ordering
-- media type and nullable capture timestamps use explicit columns
+- media type, nullable capture timestamps, and nullable native and 35 mm-equivalent focal
+  lengths use explicit columns
 - extensible metadata, EXIF, measurements, observations, and findings use scoped JSON
 
 Saving and loading preserves semantic equality, including immutable metadata mappings,
 empty collections, missing values, non-photo and unknown media, source references, EXIF,
-timezone-aware timestamps, and one asset placed in multiple galleries. Version-2 and
-version-3 databases migrate forward without silently dropping records.
+timezone-aware timestamps, and one asset placed in multiple galleries. Version-2,
+version-3, and version-4 databases migrate forward without silently dropping records.
 
 ## Existing Analytical Records
 

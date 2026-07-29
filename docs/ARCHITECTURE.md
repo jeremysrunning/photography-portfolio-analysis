@@ -120,19 +120,20 @@ The ingestion boundary passes complete normalized `Portfolio` models to a source
 repository. SQLite has no knowledge of SmugMug, and analyzers have no knowledge of the
 relational schema.
 
-Schema version 4 stores portfolios, galleries, and unique assets in explicit relational
+Schema version 5 stores portfolios, galleries, and unique assets in explicit relational
 tables. A gallery-placement table records the many-to-many relationship between galleries
 and assets, including stable placement order. Source identifiers and URLs are explicit
-columns, as are media type and optional capture timestamp. Flexible normalized metadata,
-EXIF, measurements, observations, and findings use small JSON columns because their keys
-are intentionally extensible. No table accepts image bytes.
+columns, as are media type, optional capture timestamp, and independently normalized native
+and 35 mm-equivalent focal lengths. Flexible normalized metadata, EXIF, measurements,
+observations, and findings use small JSON columns because their keys are intentionally
+extensible. No table accepts image bytes.
 
 Saves transactionally upsert records by source-scoped identity. The first normalized
 occurrence of a repeated asset supplies its canonical fields, matching analyzer
 deduplication. Records missing from later crawls are retained unless a future explicit
 synchronization operation is introduced. Empty incoming EXIF or measurements do not erase
-previous enrichment. Version-2 and version-3 databases migrate in place, and unsupported
-schema versions fail without being rewritten.
+previous enrichment. Version-2, version-3, and version-4 databases migrate in place, and
+unsupported schema versions fail without being rewritten.
 
 The SmugMug adapter uses the supported public API with an API key and no OAuth. It follows
 the linked user root node, recursively traverses paginated child-node collections, follows
@@ -161,6 +162,11 @@ completed assets.
 
 This state is operational evidence, not a photographic measurement. Analysis continues to
 read EXIF only through normalized `Asset` models.
+
+SmugMug enrichment normalizes the confirmed `FocalLength` and `FocalLength35mm` fields at
+the source boundary. SQLite receives provider-independent typed millimeter values alongside
+the original EXIF mapping. Invalid values remain missing, and neither persistence nor
+analysis infers one focal length from the other.
 
 ## Equipment Analysis
 

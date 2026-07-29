@@ -17,6 +17,7 @@ from ppa.models import (
     MediaType,
     Portfolio,
     SourceReference,
+    normalize_focal_length,
 )
 from ppa.sources.base import (
     SourceAuthenticationError,
@@ -109,9 +110,15 @@ class SmugMugSource:
             metadata,
             {"Uri", "Uris", "ResponseLevel", "UriDescription"},
         )
+        merged_exif = {**asset.exif, **exif}
         return replace(
             asset,
-            metadata=replace(asset.metadata, exif={**asset.exif, **exif}),
+            metadata=replace(
+                asset.metadata,
+                exif=merged_exif,
+                focal_length_mm=normalize_focal_length(merged_exif.get("FocalLength")),
+                focal_length_35mm=normalize_focal_length(merged_exif.get("FocalLength35mm")),
+            ),
         )
 
     @contextmanager

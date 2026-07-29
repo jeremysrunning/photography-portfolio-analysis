@@ -35,6 +35,8 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
                 "Model": "Camera A",
                 "Lens": "Lens A",
             },
+            focal_length_mm=35.0,
+            focal_length_35mm=52.5,
         ),
     )
     portrait = Asset(
@@ -88,7 +90,12 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
     assert report.orientations == {"landscape": 1, "portrait": 1}
     assert report.capture_date_coverage.available == 1
     assert report.geolocation_coverage.available == 1
-    assert "Missing metadata is reported as missing" in render_baseline(report)
+    assert report.focal_length_coverage.available == 1
+    assert report.focal_length_35mm_coverage.available == 1
+    rendered = render_baseline(report)
+    assert "Focal length: 1 / 2 (50.0%)" in rendered
+    assert "35 mm equivalent: 1 / 2 (50.0%)" in rendered
+    assert "Missing metadata is reported as missing" in rendered
 
 
 @pytest.mark.parametrize(

@@ -67,6 +67,9 @@ class PortfolioRepository(Protocol):
         asset_source_id: str,
         kind: str,
         values: dict[str, JsonValue],
+        *,
+        focal_length_mm: float | None = None,
+        focal_length_35mm: float | None = None,
     ) -> None:
         """Save derived source metadata and mark the enrichment complete."""
         ...

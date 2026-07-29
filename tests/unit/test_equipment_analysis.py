@@ -13,7 +13,7 @@ from ppa.models import (
 from ppa.reports import render_equipment
 
 
-def _asset(source_id: str, captured_at, exif=None) -> Asset:
+def _asset(source_id: str, captured_at, exif=None, focal_length_mm=None) -> Asset:
     return Asset(
         SourceReference(source_id, f"https://example.test/{source_id}"),
         AssetMetadata(
@@ -21,6 +21,7 @@ def _asset(source_id: str, captured_at, exif=None) -> Asset:
             captured_at,
             {"ImageKey": source_id},
             exif or {},
+            focal_length_mm=focal_length_mm,
         ),
     )
 
@@ -39,6 +40,7 @@ def test_equipment_report_measures_available_exif_without_ranking_quality() -> N
                 "Exposure": "1/250",
                 "ISO": 400,
             },
+            35.0,
         ),
         _asset(
             "two",
@@ -52,6 +54,7 @@ def test_equipment_report_measures_available_exif_without_ranking_quality() -> N
                 "Exposure": "1/500",
                 "ISO": 1600,
             },
+            135.0,
         ),
         _asset(
             "three",

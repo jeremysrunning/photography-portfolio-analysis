@@ -12,6 +12,7 @@ from ppa.models.portfolio import (
     Observation,
     Portfolio,
     SourceReference,
+    normalize_focal_length,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "Observation",
     "Portfolio",
     "SourceReference",
+    "normalize_focal_length",
 ]
