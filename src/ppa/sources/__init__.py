@@ -8,6 +8,7 @@ from ppa.sources.base import (
     SourceNotImplementedError,
     SourcePreviewUnavailableError,
     SourceRateLimitError,
+    SourceTransientError,
 )
 from ppa.sources.loader import load_portfolio
 
@@ -19,5 +20,6 @@ __all__ = [
     "SourceNotImplementedError",
     "SourcePreviewUnavailableError",
     "SourceRateLimitError",
+    "SourceTransientError",
     "load_portfolio",
 ]
