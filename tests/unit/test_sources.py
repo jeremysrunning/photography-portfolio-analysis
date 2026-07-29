@@ -326,6 +326,46 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
         pass
 
 
+def test_partial_enrichment_preserves_existing_typed_focal_lengths() -> None:
+    class PartialMetadataClient:
+        def get_response(self, uri):
+            assert uri == "/api/v2/image/image-1!metadata"
+            return {
+                "ImageMetadata": {
+                    "Uri": uri,
+                    "Model": "Camera B",
+                }
+            }
+
+    asset = Asset(
+        SourceReference("image-1", "https://example.smugmug.com/image-1"),
+        AssetMetadata(
+            MediaType.PHOTOGRAPH,
+            exif={
+                "FocalLength": "70.0 mm",
+                "FocalLength35mm": "98.0 mm",
+            },
+            focal_length_mm=70.0,
+            focal_length_35mm=98.0,
+        ),
+    )
+    source = SmugMugSource(
+        "https://example.smugmug.com",
+        "secret",
+        PartialMetadataClient(),
+    )
+
+    enriched = source.enrich_asset_metadata(asset)
+
+    assert enriched.exif == {
+        "FocalLength": "70.0 mm",
+        "FocalLength35mm": "98.0 mm",
+        "Model": "Camera B",
+    }
+    assert enriched.metadata.focal_length_mm == 70.0
+    assert enriched.metadata.focal_length_35mm == 98.0
+
+
 def test_smugmug_client_retries_transient_and_rate_limited_requests(caplog) -> None:
     class RetryingTransport:
         def __init__(self) -> None:

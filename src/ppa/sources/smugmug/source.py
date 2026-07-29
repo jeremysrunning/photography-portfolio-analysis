@@ -110,13 +110,14 @@ class SmugMugSource:
             metadata,
             {"Uri", "Uris", "ResponseLevel", "UriDescription"},
         )
+        merged_exif = {**asset.exif, **exif}
         return replace(
             asset,
             metadata=replace(
                 asset.metadata,
-                exif={**asset.exif, **exif},
-                focal_length_mm=normalize_focal_length(exif.get("FocalLength")),
-                focal_length_35mm=normalize_focal_length(exif.get("FocalLength35mm")),
+                exif=merged_exif,
+                focal_length_mm=normalize_focal_length(merged_exif.get("FocalLength")),
+                focal_length_35mm=normalize_focal_length(merged_exif.get("FocalLength35mm")),
             ),
         )
 
