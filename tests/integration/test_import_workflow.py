@@ -5,7 +5,11 @@ from importlib import import_module
 import pytest
 
 from ppa.cli import main
-from ppa.core.workflows import PersistenceError, persist_portfolio
+from ppa.core.workflows import (
+    PersistenceError,
+    enrichment_snapshot,
+    persist_portfolio,
+)
 from ppa.models import (
     Asset,
     AssetMetadata,
@@ -333,3 +337,67 @@ def test_persistence_failure_rolls_back_file_backed_database(tmp_path) -> None:
         stored = repository.get("smugmug", "example")
     assert stored is not None
     assert stored.title == "Original"
+
+
+def test_later_import_uses_retained_persisted_population(monkeypatch, tmp_path, capsys) -> None:
+    initial = _portfolio(_asset("asset-a"), _asset("asset-b"))
+    later = _portfolio(_asset("asset-a"))
+    _install_source(monkeypatch, initial)
+
+    class RetainedAssetClient:
+        include_retained = False
+
+        def __init__(self, site_url: str, api_key: str) -> None:
+            pass
+
+        def get_response(self, uri: str):
+            source_ids = uri.split("/image/", 1)[1].split("!", 1)[0].split(",")
+            if not RetainedAssetClient.include_retained:
+                source_ids = [source_id for source_id in source_ids if source_id == "asset-a"]
+            return {
+                "ImageMetadata": [
+                    {
+                        "Uri": f"/api/v2/image/{source_id}!metadata",
+                        "Model": "Camera",
+                    }
+                    for source_id in source_ids
+                ]
+            }
+
+    workflows = import_module("ppa.core.workflows")
+    monkeypatch.setattr(workflows, "SmugMugApiClient", RetainedAssetClient)
+    database = tmp_path / "portfolio.sqlite3"
+    command = [
+        "import",
+        initial.source_url,
+        "--database",
+        str(database),
+        "--api-key",
+        "secret",
+    ]
+
+    assert main(command) == 1
+    capsys.readouterr()
+
+    _install_source(monkeypatch, later)
+    RetainedAssetClient.include_retained = True
+    assert main([*command, "--retry-failed"]) == 0
+    output = capsys.readouterr().out
+
+    assert "Unique assets discovered in this inspection: 1" in output
+    assert "Total assets currently persisted: 2" in output
+    assert "Photographs newly enriched during this run: 1" in output
+    assert "Photographs already enriched before this run: 1" in output
+    with SQLitePortfolioRepository(database) as repository:
+        persisted = repository.get("smugmug", "example")
+    assert persisted is not None
+    assert {asset.source_id for asset in persisted.assets} == {"asset-a", "asset-b"}
+    assert persisted.asset("asset-b").exif["Model"] == "Camera"
+
+    snapshot = enrichment_snapshot(later, database)
+    assert snapshot.photographs_complete == 2
+    assert snapshot.non_photos_complete == 0
+    assert snapshot.unknown_complete == 0
+    assert snapshot.status.completed == 2
+    assert snapshot.status.pending == 0
+    assert snapshot.status.failed == 0

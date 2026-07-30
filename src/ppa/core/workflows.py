@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ppa.models import MediaType, Portfolio
-from ppa.sources import load_portfolio
+from ppa.sources import SourceError, load_portfolio
 from ppa.sources.smugmug import SmugMugApiClient, SmugMugExifEnricher, SmugMugSource
 from ppa.sources.smugmug.enrichment import EnrichmentResult
 from ppa.storage import (
@@ -37,6 +37,14 @@ class PortfolioCounts:
 @dataclass(frozen=True, slots=True)
 class InspectionResult:
     """Normalized portfolio and its import-facing counts."""
+
+    portfolio: Portfolio
+    counts: PortfolioCounts
+
+
+@dataclass(frozen=True, slots=True)
+class PersistenceResult:
+    """Persisted portfolio and counts after conservative repository retention."""
 
     portfolio: Portfolio
     counts: PortfolioCounts
@@ -79,19 +87,22 @@ def portfolio_counts(portfolio: Portfolio) -> PortfolioCounts:
     )
 
 
-def persist_portfolio(portfolio: Portfolio, database: Path) -> None:
-    """Persist one normalized portfolio using the repository transaction boundary."""
+def persist_portfolio(portfolio: Portfolio, database: Path) -> PersistenceResult:
+    """Persist and reload one portfolio using the repository transaction boundary."""
     try:
         with SQLitePortfolioRepository(database) as repository:
             repository.save(portfolio)
+            persisted = _persisted_portfolio(repository, portfolio)
     except (OSError, sqlite3.Error, UnsupportedSchemaVersionError) as error:
         raise PersistenceError(str(error)) from error
+    return PersistenceResult(persisted, portfolio_counts(persisted))
 
 
 def enrichment_snapshot(portfolio: Portfolio, database: Path) -> EnrichmentSnapshot:
     """Read aggregate and media-type-specific EXIF completion state."""
     with SQLitePortfolioRepository(database) as repository:
-        return _snapshot(repository, portfolio)
+        persisted = _persisted_portfolio(repository, portfolio)
+        return _snapshot(repository, persisted)
 
 
 def enrich_portfolio_exif(
@@ -106,30 +117,41 @@ def enrich_portfolio_exif(
 ) -> ExifWorkflowResult:
     """Enrich outstanding assets and return typed before/after state."""
     if portfolio.source_name != "smugmug":
-        from ppa.sources import SourceError
-
         raise SourceError(f"EXIF enrichment is not implemented for source: {portfolio.source_name}")
     with SQLitePortfolioRepository(database) as repository:
-        before = _snapshot(repository, portfolio)
+        persisted = _persisted_portfolio(repository, portfolio)
+        before = _snapshot(repository, persisted)
         targets = repository.list_enrichment_targets(
-            portfolio.source_name,
-            portfolio.source_id,
+            persisted.source_name,
+            persisted.source_id,
             "exif",
             retry_failed=retry_failed,
             limit=limit,
         )
         run = SmugMugExifEnricher(
-            SmugMugApiClient(portfolio.source_url, api_key),
+            SmugMugApiClient(persisted.source_url, api_key),
             repository,
             batch_size=batch_size,
         ).enrich(
-            portfolio.source_name,
-            portfolio.source_id,
+            persisted.source_name,
+            persisted.source_id,
             targets,
             progress,
         )
-        after = _snapshot(repository, portfolio)
+        after = _snapshot(repository, persisted)
     return ExifWorkflowResult(before, run, after)
+
+
+def _persisted_portfolio(
+    repository: SQLitePortfolioRepository,
+    portfolio: Portfolio,
+) -> Portfolio:
+    persisted = repository.get(portfolio.source_name, portfolio.source_id)
+    if persisted is None:
+        raise SourceError(
+            f"Persisted portfolio not found: {portfolio.source_name}/{portfolio.source_id}"
+        )
+    return persisted
 
 
 def _snapshot(

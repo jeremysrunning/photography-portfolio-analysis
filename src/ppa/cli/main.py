@@ -20,6 +20,7 @@ from ppa.core.workflows import (
     ExifWorkflowResult,
     InspectionResult,
     PersistenceError,
+    PersistenceResult,
     enrich_portfolio_exif,
     enrichment_snapshot,
     inspect_public_portfolio,
@@ -396,7 +397,7 @@ def _import_portfolio(args: argparse.Namespace) -> int:
 
     print("Stage 2/3: Persisting normalized metadata")
     try:
-        persist_portfolio(inspection.portfolio, args.database)
+        persistence = persist_portfolio(inspection.portfolio, args.database)
     except PersistenceError as error:
         logger.error("portfolio_import_persistence_failed", extra={"reason": str(error)})
         print(f"Persistence failed: {error}")
@@ -405,7 +406,7 @@ def _import_portfolio(args: argparse.Namespace) -> int:
     print(f"Saved normalized metadata to {args.database}")
 
     print("Stage 3/3: Enriching EXIF")
-    before = enrichment_snapshot(inspection.portfolio, args.database)
+    before = enrichment_snapshot(persistence.portfolio, args.database)
     _print_enrichment_start(before)
     progress_interval = 250
 
@@ -415,29 +416,30 @@ def _import_portfolio(args: argparse.Namespace) -> int:
 
     try:
         result = enrich_portfolio_exif(
-            inspection.portfolio,
+            persistence.portfolio,
             args.database,
             args.api_key,
             retry_failed=args.retry_failed,
             progress=show_progress,
         )
     except SourceRateLimitError as error:
-        after = enrichment_snapshot(inspection.portfolio, args.database)
+        after = enrichment_snapshot(persistence.portfolio, args.database)
         logger.warning("portfolio_import_rate_limited", extra={"reason": str(error)})
         print(str(error))
-        _print_import_summary(inspection, before, after, args.database, started)
+        _print_import_summary(inspection, persistence, before, after, args.database, started)
         _print_resume_guidance()
         return 2
     except (OSError, SourceError, ValueError) as error:
-        after = enrichment_snapshot(inspection.portfolio, args.database)
+        after = enrichment_snapshot(persistence.portfolio, args.database)
         logger.error("portfolio_import_enrichment_failed", extra={"reason": str(error)})
         print(f"EXIF enrichment stopped: {error}")
-        _print_import_summary(inspection, before, after, args.database, started)
+        _print_import_summary(inspection, persistence, before, after, args.database, started)
         _print_resume_guidance()
         return 1
 
     _print_import_summary(
         inspection,
+        persistence,
         result.before,
         result.after,
         args.database,
@@ -470,6 +472,7 @@ def _print_enrichment_start(before: EnrichmentSnapshot) -> None:
 
 def _print_import_summary(
     inspection: InspectionResult,
+    persistence: PersistenceResult,
     before: EnrichmentSnapshot,
     after: EnrichmentSnapshot,
     database: Path,
@@ -481,7 +484,8 @@ def _print_import_summary(
     print("Import summary")
     print(f"  Database: {database}")
     print(f"  Galleries inspected: {inspection.counts.galleries:,}")
-    print(f"  Unique assets persisted: {inspection.counts.unique_media:,}")
+    print(f"  Unique assets discovered in this inspection: {inspection.counts.unique_media:,}")
+    print(f"  Total assets currently persisted: {persistence.counts.unique_media:,}")
     print(f"  Photographs newly enriched during this run: {newly_enriched:,}")
     print(f"  Photographs already enriched before this run: {before.photographs_complete:,}")
     print(
