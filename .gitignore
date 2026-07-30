@@ -24,3 +24,6 @@ venv/
 *.db-journal
 *-wal
 *-shm
+
+# Local visual-preview research outputs
+research-output/

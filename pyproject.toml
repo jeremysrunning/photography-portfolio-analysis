@@ -17,6 +17,11 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.9",
 ]
+research = [
+    "numpy==2.5.1",
+    "Pillow==12.3.0",
+    "psutil==7.2.2",
+]
 
 [project.scripts]
 ppa = "ppa.cli:main"
