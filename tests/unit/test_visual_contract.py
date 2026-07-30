@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from datetime import datetime
 
 import pytest
 
@@ -67,6 +68,18 @@ def test_confidence_distinguishes_zero_none_and_deterministic_measurements() -> 
             "mean",
             "1",
             confidence=0.5,
+        )
+
+
+def test_result_completion_timestamp_must_be_timezone_aware() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        VisualResult(
+            "brightness",
+            VisualResultKind.MEASUREMENT,
+            0.4,
+            "mean",
+            "1",
+            completed_at=datetime(2026, 1, 1),
         )
 
 

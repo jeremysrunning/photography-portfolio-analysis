@@ -71,6 +71,9 @@ def test_schema_v6_creation_and_v5_additive_migration(tmp_path) -> None:
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
     assert {"visual_analysis_runs", "visual_analysis_results"} <= tables
+    with sqlite3.connect(database) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM visual_analysis_runs").fetchone() == (0,)
+        assert connection.execute("SELECT COUNT(*) FROM visual_analysis_results").fetchone() == (0,)
 
 
 def test_initial_claim_completion_and_round_trip_all_value_families(tmp_path) -> None:
@@ -108,6 +111,11 @@ def test_initial_claim_completion_and_round_trip_all_value_families(tmp_path) ->
     assert snapshot.state.has_successful_snapshot
     assert snapshot.state.attempts == 1
     assert snapshot.state.last_successful_completed_at == T0 + timedelta(seconds=2)
+    assert {item.completed_at for item in snapshot.results} == {
+        snapshot.state.last_successful_completed_at
+    }
+    assert all(item.completed_at is not None for item in snapshot.results)
+    assert all(item.completed_at.utcoffset() is not None for item in snapshot.results)
     assert {item.name for item in snapshot.results} == {
         "brightness",
         "contains_people",
@@ -115,6 +123,27 @@ def test_initial_claim_completion_and_round_trip_all_value_families(tmp_path) ->
         "subject_box",
     }
     assert next(item for item in snapshot.results if item.name == "contains_people").confidence == 0
+
+
+def test_completed_result_round_trip_preserves_timestamp_exactly(tmp_path) -> None:
+    repository = _repository(tmp_path / "portfolio.sqlite3")
+    completed = VisualResult(
+        "brightness",
+        VisualResultKind.MEASUREMENT,
+        0.4,
+        "pixel-statistics",
+        "1.0",
+        unit="normalized",
+        completed_at=T0,
+    )
+    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    repository.complete_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, (completed,), at=T0
+    )
+
+    loaded = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    assert loaded.results == (completed,)
+    assert loaded.state.last_successful_completed_at == completed.completed_at
 
 
 def test_versions_and_configurations_coexist_without_overwrite(tmp_path) -> None:
@@ -152,6 +181,7 @@ def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_pa
     assert running.state.status is VisualRunStatus.RUNNING
     assert running.state.last_successful_completed_at == T0
     assert running.results[0].value == 0.25
+    assert running.results[0].completed_at == T0
 
     repository.cancel_visual_analysis(
         "test", "portfolio-1", "asset-1", IDENTITY, at=T0 + timedelta(hours=2)
@@ -162,6 +192,7 @@ def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_pa
     assert cancelled.state.interruption_category == "cancelled"
     assert cancelled.state.last_successful_completed_at == T0
     assert cancelled.results[0].value == 0.25
+    assert cancelled.results[0].completed_at == T0
     assert not repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
     assert repository.claim_visual_analysis(
         "test", "portfolio-1", "asset-1", IDENTITY, retry_failed=True
@@ -174,6 +205,7 @@ def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_pa
     assert failed.state.attempts == 3
     assert failed.results[0].value == 0.25
     assert failed.state.last_successful_completed_at == T0
+    assert failed.results[0].completed_at == T0
 
 
 def test_successful_refresh_atomically_replaces_snapshot(tmp_path) -> None:
@@ -198,6 +230,7 @@ def test_successful_refresh_atomically_replaces_snapshot(tmp_path) -> None:
     snapshot = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
     assert snapshot.state.last_successful_completed_at == replacement_time
     assert [(result.name, result.value) for result in snapshot.results] == [("new", 2)]
+    assert snapshot.results[0].completed_at == replacement_time
 
 
 def test_result_replacement_rolls_back_on_failure(tmp_path) -> None:
@@ -232,6 +265,7 @@ def test_result_replacement_rolls_back_on_failure(tmp_path) -> None:
     assert snapshot.state.status is VisualRunStatus.RUNNING
     assert snapshot.state.last_successful_completed_at == T0
     assert [(result.name, result.value) for result in snapshot.results] == [("old", 1)]
+    assert snapshot.results[0].completed_at == T0
 
 
 def test_exact_identity_claim_is_concurrency_safe(tmp_path) -> None:

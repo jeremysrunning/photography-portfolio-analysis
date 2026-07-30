@@ -130,8 +130,8 @@ Visual analysis uses a separate application-level contract and does not expand t
 `Measurement`, `Observation`, or `Finding` types. Each result belongs to an immutable
 identity consisting of analyzer name, analyzer version, and configuration version. A
 result has a unique name, a deterministic-measurement or model-classification kind, a
-non-null JSON-compatible value, method provenance, and optional unit, model provenance,
-and classification confidence.
+non-null JSON-compatible value, method provenance, a timezone-aware successful-completion
+timestamp, and optional unit, model provenance, and classification confidence.
 
 Confidence `0.0` is recorded evidence. `None` means the method did not provide confidence.
 An absent result row means the measurement or classification is missing. Deterministic
@@ -140,7 +140,9 @@ use coordinates in `[0, 1]`; bounding boxes must remain within the image frame.
 
 Each exact asset/analyzer/configuration identity has a current status: `pending`,
 `running`, `completed`, `failed`, or `skipped`. `last_successful_completed_at` identifies
-the stored result snapshot. During a refresh, failure, or cancellation, readers can
+the stored result snapshot. Every result in that snapshot exposes the same timestamp;
+snapshot construction rejects missing or inconsistent result provenance. During a
+refresh, failure, or cancellation, readers can
 therefore distinguish an older successful snapshot from the current incomplete attempt.
 Cancellation returns the identity to `pending`, retains its incremented attempt count, and
 records an interruption category and timestamp. Its next claim requires explicit retry.

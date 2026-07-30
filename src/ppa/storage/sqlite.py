@@ -690,6 +690,14 @@ class SQLitePortfolioRepository:
         if len(names) != len(set(names)):
             raise ValueError("visual result names must be unique within one completion")
         timestamp = _timestamp(at)
+        completed_at = datetime.fromisoformat(timestamp)
+        if any(
+            result.completed_at is not None and result.completed_at != completed_at
+            for result in results
+        ):
+            raise ValueError(
+                "visual result completed_at must match the atomic completion timestamp"
+            )
         key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
         with self._immediate_transaction() as connection:
             self._require_running(connection, key)
@@ -923,6 +931,7 @@ class SQLitePortfolioRepository:
             method_version=row["method_version"],
             model_name=row["model_name"],
             model_version=row["model_version"],
+            completed_at=_read_timestamp(row["completed_at"]),
         )
 
     @staticmethod

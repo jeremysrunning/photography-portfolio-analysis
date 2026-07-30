@@ -103,6 +103,7 @@ class VisualResult:
     confidence: float | None = None
     model_name: str | None = None
     model_version: str | None = None
+    completed_at: datetime | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("name", "method_name", "method_version"):
@@ -130,6 +131,7 @@ class VisualResult:
             raise ValueError("confidence must be between 0.0 and 1.0 or None")
         if (self.model_name is None) != (self.model_version is None):
             raise ValueError("model name and version must be supplied together")
+        _aware_timestamp(self.completed_at, "visual result completed_at")
         object.__setattr__(self, "value", _freeze_json(value))
         if self.confidence is not None:
             object.__setattr__(self, "confidence", float(self.confidence))
@@ -150,6 +152,15 @@ class VisualRunState:
     interrupted_at: datetime | None = None
     skip_reason: str | None = None
 
+    def __post_init__(self) -> None:
+        for field_name in (
+            "updated_at",
+            "started_at",
+            "last_successful_completed_at",
+            "interrupted_at",
+        ):
+            _aware_timestamp(getattr(self, field_name), f"visual run {field_name}")
+
     @property
     def has_successful_snapshot(self) -> bool:
         """Return whether results from a prior successful completion may exist."""
@@ -164,6 +175,13 @@ class VisualAnalysisSnapshot:
     state: VisualRunState
     results: tuple[VisualResult, ...] = ()
 
+    def __post_init__(self) -> None:
+        completion = self.state.last_successful_completed_at
+        if self.results and completion is None:
+            raise ValueError("visual results require a successful snapshot timestamp")
+        if any(result.completed_at != completion for result in self.results):
+            raise ValueError("visual result timestamps must equal last_successful_completed_at")
+
 
 def _normalized(value: object, name: str) -> None:
     if (
@@ -173,6 +191,11 @@ def _normalized(value: object, name: str) -> None:
         or not 0 <= float(value) <= 1
     ):
         raise ValueError(f"normalized {name} must be between 0.0 and 1.0")
+
+
+def _aware_timestamp(value: datetime | None, name: str) -> None:
+    if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+        raise ValueError(f"{name} must be timezone-aware")
 
 
 def _json_value(value: object) -> bool:
