@@ -63,12 +63,14 @@ class PreviewMetadata:
     width: int
     height: int
     content_type: str
-    encoded_byte_count: int
+    downloaded_content_type: str
+    downloaded_encoded_byte_count: int
     provenance: str
     storage_mode: PreviewStorageMode
     provider_reported_width: int | None = None
     provider_reported_height: int | None = None
     orientation_swap_applied: bool = False
+    temporary_file_byte_count: int | None = None
 
     def __post_init__(self) -> None:
         if not 1 <= self.requested_maximum_edge <= PRODUCTION_PREVIEW_MAXIMUM_EDGE:
@@ -77,10 +79,12 @@ class PreviewMetadata:
             raise ValueError("preview dimensions must be positive")
         if max(self.width, self.height) > self.requested_maximum_edge:
             raise ValueError("preview dimensions exceed the requested maximum edge")
-        if self.encoded_byte_count < 1:
-            raise ValueError("encoded_byte_count must be positive")
+        if self.downloaded_encoded_byte_count < 1:
+            raise ValueError("downloaded_encoded_byte_count must be positive")
         if not self.content_type.startswith("image/"):
             raise ValueError("content_type must be an image media type")
+        if not self.downloaded_content_type.startswith("image/"):
+            raise ValueError("downloaded_content_type must be an image media type")
         if not self.provenance.strip():
             raise ValueError("provenance must not be empty")
         reported = (self.provider_reported_width, self.provider_reported_height)
@@ -88,6 +92,11 @@ class PreviewMetadata:
             raise ValueError("provider-reported dimensions must be supplied together")
         if any(value is not None and value < 1 for value in reported):
             raise ValueError("provider-reported dimensions must be positive")
+        if self.storage_mode is PreviewStorageMode.MEMORY:
+            if self.temporary_file_byte_count is not None:
+                raise ValueError("memory-backed previews have no temporary-file byte count")
+        elif self.temporary_file_byte_count is None or self.temporary_file_byte_count < 1:
+            raise ValueError("temporary-file previews require a positive file byte count")
 
 
 @dataclass(slots=True)

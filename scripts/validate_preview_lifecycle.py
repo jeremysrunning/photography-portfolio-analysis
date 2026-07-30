@@ -48,7 +48,8 @@ def main() -> int:
     decoded_edges: Counter[int] = Counter()
     content_types: Counter[str] = Counter()
     storage_modes: Counter[str] = Counter()
-    byte_counts: list[int] = []
+    downloaded_byte_counts: list[int] = []
+    temporary_file_byte_counts: list[int] = []
     residual_files = 0
 
     for index, asset in enumerate(sample):
@@ -68,7 +69,9 @@ def main() -> int:
                 completed += 1
                 content_types[preview.metadata.content_type] += 1
                 storage_modes[preview.metadata.storage_mode.value] += 1
-                byte_counts.append(preview.metadata.encoded_byte_count)
+                downloaded_byte_counts.append(preview.metadata.downloaded_encoded_byte_count)
+                if preview.metadata.temporary_file_byte_count is not None:
+                    temporary_file_byte_counts.append(preview.metadata.temporary_file_byte_count)
         except SourceError as error:
             failures[type(error).__name__] += 1
         if path is not None and path.exists():
@@ -83,11 +86,17 @@ def main() -> int:
         "decoded_longest_edges": {str(key): value for key, value in sorted(decoded_edges.items())},
         "content_types": dict(sorted(content_types.items())),
         "storage_modes": dict(sorted(storage_modes.items())),
-        "encoded_bytes": {
-            "count": len(byte_counts),
-            "minimum": min(byte_counts) if byte_counts else None,
-            "median": median(byte_counts) if byte_counts else None,
-            "maximum": max(byte_counts) if byte_counts else None,
+        "downloaded_encoded_bytes": {
+            "count": len(downloaded_byte_counts),
+            "minimum": min(downloaded_byte_counts) if downloaded_byte_counts else None,
+            "median": median(downloaded_byte_counts) if downloaded_byte_counts else None,
+            "maximum": max(downloaded_byte_counts) if downloaded_byte_counts else None,
+        },
+        "temporary_file_bytes": {
+            "count": len(temporary_file_byte_counts),
+            "minimum": min(temporary_file_byte_counts) if temporary_file_byte_counts else None,
+            "median": median(temporary_file_byte_counts) if temporary_file_byte_counts else None,
+            "maximum": max(temporary_file_byte_counts) if temporary_file_byte_counts else None,
         },
         "temporary_files_remaining": residual_files,
     }

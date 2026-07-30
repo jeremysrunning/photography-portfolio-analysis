@@ -300,10 +300,14 @@ with source.open_preview(asset, PreviewRequest(maximum_edge=512)) as preview:
 
 Temporary-file mode must be requested explicitly with
 `PreviewStorageMode.TEMPORARY_FILE`. It returns an owned OS-managed path for a
-file-path-only library and does not retain a decoded image. The neutral random filename
-contains no source identifier, title, URL, or credential. Closing the resource deletes the
-path; cleanup is also performed for exceptions and cooperative cancellation. Cleanup
-cannot be guaranteed after forcible process termination.
+file-path-only library and does not retain a decoded image. The validated,
+EXIF-orientation-applied raster is encoded as PNG so file and memory modes expose the same
+pixel dimensions and coordinate orientation. `content_type` describes the exposed
+resource, while `downloaded_content_type`, `downloaded_encoded_byte_count`, and the
+optional `temporary_file_byte_count` keep transfer and re-encoded file facts distinct.
+The neutral random filename contains no source identifier, title, URL, or credential.
+Closing the resource deletes the path; cleanup is also performed for exceptions and
+cooperative cancellation. Cleanup cannot be guaranteed after forcible process termination.
 
 SmugMug preview access uses official image-size metadata, selects the closest supported
 non-original preview at or below the request, and never upscales or silently resizes.

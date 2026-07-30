@@ -329,7 +329,9 @@ contract-shape guidance in this section:
 - memory-backed resources return an owned decoded image and metadata only; encoded bytes
   are released before return
 - temporary-file mode is explicit and returns an owned neutral OS path without retaining
-  a decoded image
+  a decoded image; the orientation-applied raster is re-encoded as PNG so it matches the
+  memory-backed coordinate system
+- downloaded encoding facts and temporary-file encoding facts remain distinct in metadata
 - production ceilings are 1,024 pixels and 8,000,000 encoded bytes
 - cooperative cancellation is an optional callback checked at source lifecycle boundaries
 - provider-reported and decoded dimensions use a conservative exact-match rule with an

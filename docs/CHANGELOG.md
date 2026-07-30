@@ -79,7 +79,8 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Fixed
 
-- Nothing yet.
+- Kept temporary-file and memory-backed previews in the same EXIF-orientation-applied
+  pixel coordinate system, with explicit downloaded-versus-file encoding metadata.
 
 ---
 

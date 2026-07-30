@@ -59,9 +59,12 @@ types, and memory or temporary-file storage mode. The source returns a context-m
 Memory mode owns one decoded image and deliberately releases encoded bytes before return.
 This keeps a single decoded preview shareable by compatible analyzers during one asset
 pass without retaining both encoded and decoded representations. Temporary-file mode is
-explicit and owns only a neutral OS-generated path for a file-path-only consumer. Closing
-the resource closes its image or deletes its path idempotently. Network responses never
-escape the source lifecycle.
+explicit and owns only a neutral OS-generated path for a file-path-only consumer. The
+source writes the orientation-applied decoded raster as PNG, so storage mode does not
+change pixel dimensions or the visual coordinate system. Metadata distinguishes the
+downloaded content type and byte count from the exposed file content type and re-encoded
+file byte count. Closing the resource closes its image or deletes its path idempotently.
+Network responses never escape the source lifecycle.
 
 The contract caps production previews at a 1,024-pixel longest edge and 8,000,000 encoded
 bytes. Sources must select a non-original candidate at or below the request, validate

@@ -162,30 +162,49 @@ class SmugMugPreviewService:
                 reported_height=candidate.height,
             )
             _raise_if_cancelled(is_cancelled)
-            metadata = PreviewMetadata(
-                requested_maximum_edge=request.maximum_edge,
-                width=image.width,
-                height=image.height,
-                content_type=downloaded.content_type,
-                encoded_byte_count=len(downloaded.content),
-                provenance="smugmug_image_size_details",
-                storage_mode=request.storage_mode,
-                provider_reported_width=candidate.width,
-                provider_reported_height=candidate.height,
-                orientation_swap_applied=orientation_swap,
-            )
             if request.storage_mode is PreviewStorageMode.MEMORY:
                 _raise_if_cancelled(is_cancelled)
+                metadata = PreviewMetadata(
+                    requested_maximum_edge=request.maximum_edge,
+                    width=image.width,
+                    height=image.height,
+                    content_type=downloaded.content_type,
+                    downloaded_content_type=downloaded.content_type,
+                    downloaded_encoded_byte_count=len(downloaded.content),
+                    provenance="smugmug_image_size_details",
+                    storage_mode=request.storage_mode,
+                    provider_reported_width=candidate.width,
+                    provider_reported_height=candidate.height,
+                    orientation_swap_applied=orientation_swap,
+                )
                 resource = PreviewResource.memory(metadata, image)
                 image = None
             else:
-                temporary_path = _write_temporary_preview(
-                    downloaded.content,
-                    downloaded.content_type,
+                decoded_width, decoded_height = image.size
+                temporary_path, temporary_file_byte_count = _write_temporary_preview(
+                    image,
                 )
+                if temporary_file_byte_count > request.maximum_bytes:
+                    raise SourcePreviewPayloadTooLargeError(
+                        "The normalized temporary preview exceeded the requested byte limit."
+                    )
                 image.close()
                 image = None
                 _raise_if_cancelled(is_cancelled)
+                metadata = PreviewMetadata(
+                    requested_maximum_edge=request.maximum_edge,
+                    width=decoded_width,
+                    height=decoded_height,
+                    content_type="image/png",
+                    downloaded_content_type=downloaded.content_type,
+                    downloaded_encoded_byte_count=len(downloaded.content),
+                    provenance="smugmug_image_size_details",
+                    storage_mode=request.storage_mode,
+                    provider_reported_width=candidate.width,
+                    provider_reported_height=candidate.height,
+                    orientation_swap_applied=orientation_swap,
+                    temporary_file_byte_count=temporary_file_byte_count,
+                )
                 resource = PreviewResource.temporary_file(metadata, temporary_path)
                 temporary_path = None
             return resource
@@ -384,23 +403,18 @@ def _decode_and_validate(
     return decoded, orientation_swap
 
 
-def _write_temporary_preview(content: bytes, content_type: str) -> Path:
-    suffixes = {
-        "image/jpeg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-    }
+def _write_temporary_preview(image: Image.Image) -> tuple[Path, int]:
     path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
             mode="wb",
             prefix="ppa-preview-",
-            suffix=suffixes.get(content_type, ".img"),
+            suffix=".png",
             delete=False,
         ) as handle:
             path = Path(handle.name)
-            handle.write(content)
-        return path
+            image.save(handle, format="PNG")
+        return path, path.stat().st_size
     except BaseException:
         if path is not None:
             path.unlink(missing_ok=True)

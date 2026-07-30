@@ -94,13 +94,14 @@ class FakeGallerySource:
         image = Image.new("RGB", (64, 48))
         return PreviewResource.memory(
             PreviewMetadata(
-                request.maximum_edge,
-                64,
-                48,
-                "image/jpeg",
-                7,
-                "fake",
-                PreviewStorageMode.MEMORY,
+                requested_maximum_edge=request.maximum_edge,
+                width=64,
+                height=48,
+                content_type="image/jpeg",
+                downloaded_content_type="image/jpeg",
+                downloaded_encoded_byte_count=7,
+                provenance="fake",
+                storage_mode=PreviewStorageMode.MEMORY,
             ),
             image,
         )

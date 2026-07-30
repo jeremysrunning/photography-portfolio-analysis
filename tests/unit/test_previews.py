@@ -52,6 +52,19 @@ def _image_bytes(
     return output.getvalue()
 
 
+def _oriented_pattern_bytes() -> bytes:
+    image = Image.new("RGB", (40, 60), (0, 0, 0))
+    for y in range(60):
+        for x in range(40):
+            image.putpixel((x, y), (x * 5, y * 3, (x + y) * 2))
+    output = io.BytesIO()
+    exif = Image.Exif()
+    exif[274] = 6
+    image.save(output, "JPEG", exif=exif, quality=95)
+    image.close()
+    return output.getvalue()
+
+
 class FakeClient:
     def __init__(self, sizes: dict | None = None) -> None:
         self.sizes = sizes or {
@@ -164,16 +177,17 @@ def test_memory_resource_returns_metadata_and_releases_decoded_image() -> None:
         shared_image = resource.image
         assert shared_image is resource.image
         assert resource.metadata == PreviewMetadata(
-            256,
-            256,
-            192,
-            "image/jpeg",
-            len(_image_bytes()),
-            "smugmug_image_size_details",
-            PreviewStorageMode.MEMORY,
-            256,
-            192,
-            False,
+            requested_maximum_edge=256,
+            width=256,
+            height=192,
+            content_type="image/jpeg",
+            downloaded_content_type="image/jpeg",
+            downloaded_encoded_byte_count=len(_image_bytes()),
+            provenance="smugmug_image_size_details",
+            storage_mode=PreviewStorageMode.MEMORY,
+            provider_reported_width=256,
+            provider_reported_height=192,
+            orientation_swap_applied=False,
         )
         assert not hasattr(resource, "encoded_bytes")
         assert not hasattr(resource, "encoded_stream")
@@ -258,6 +272,46 @@ def test_exif_orientation_width_height_swap_is_accepted() -> None:
     with service.open_preview(_asset(), PreviewRequest(256)) as resource:
         assert resource.image.size == (256, 192)
         assert resource.metadata.orientation_swap_applied is True
+
+
+def test_exif_oriented_memory_and_temporary_file_have_identical_raster() -> None:
+    content = _oriented_pattern_bytes()
+    sizes = {
+        "SmallImageUrl": "https://cdn.example.test/small.jpg",
+        "SmallImageWidth": 40,
+        "SmallImageHeight": 60,
+    }
+    memory_service, _, _ = _service(
+        sizes=sizes,
+        response=FakeResponse(content),
+    )
+    file_service, _, _ = _service(
+        sizes=sizes,
+        response=FakeResponse(content),
+    )
+
+    with memory_service.open_preview(_asset(), PreviewRequest(60)) as memory_resource:
+        memory_size = memory_resource.image.size
+        memory_pixels = memory_resource.image.tobytes()
+        assert memory_resource.metadata.content_type == "image/jpeg"
+        assert memory_resource.metadata.temporary_file_byte_count is None
+
+    with file_service.open_preview(
+        _asset(),
+        PreviewRequest(60, storage_mode=PreviewStorageMode.TEMPORARY_FILE),
+    ) as file_resource:
+        path = file_resource.temporary_path
+        assert path.suffix == ".png"
+        assert file_resource.metadata.content_type == "image/png"
+        assert file_resource.metadata.downloaded_content_type == "image/jpeg"
+        assert file_resource.metadata.downloaded_encoded_byte_count == len(content)
+        assert file_resource.metadata.temporary_file_byte_count == path.stat().st_size
+        with Image.open(path) as temporary_image:
+            assert temporary_image.format == "PNG"
+            assert temporary_image.size == memory_size == (60, 40)
+            assert temporary_image.convert("RGB").tobytes() == memory_pixels
+
+    assert not path.exists()
 
 
 @pytest.mark.parametrize(
