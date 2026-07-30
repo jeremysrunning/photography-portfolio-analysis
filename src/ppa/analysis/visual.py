@@ -24,6 +24,11 @@ class VisualAnalyzer(Protocol):
         """Return the bounded preview required by this analyzer."""
         ...
 
+    @property
+    def allows_empty_results(self) -> bool:
+        """Return whether successful analysis may intentionally emit no results."""
+        ...
+
     def analyze(
         self,
         asset: Asset,
@@ -41,6 +46,7 @@ def register_visual_analyzer(analyzer: VisualAnalyzer) -> None:
     """Register one production analyzer under its stable analyzer name."""
     if analyzer.preview_request.storage_mode is not PreviewStorageMode.MEMORY:
         raise ValueError("visual analyzers must use memory-backed previews")
+    allows_empty_results(analyzer)
     name = analyzer.identity.name
     if name in _ANALYZERS:
         raise ValueError(f"visual analyzer is already registered: {name}")
@@ -55,3 +61,11 @@ def get_visual_analyzer(name: str) -> VisualAnalyzer | None:
 def list_visual_analyzers() -> tuple[str, ...]:
     """List registered analyzer names deterministically."""
     return tuple(sorted(_ANALYZERS))
+
+
+def allows_empty_results(analyzer: VisualAnalyzer) -> bool:
+    """Return an analyzer's explicit empty-output policy, defaulting to false."""
+    value = getattr(analyzer, "allows_empty_results", False)
+    if not isinstance(value, bool):
+        raise ValueError("allows_empty_results must be a boolean")
+    return value

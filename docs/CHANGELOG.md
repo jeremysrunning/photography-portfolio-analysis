@@ -14,7 +14,8 @@ The format is intentionally simple. This project values documenting the evolutio
   exact analyzer/configuration claims, bounded preview retries, incremental persistence,
   graceful cancellation, bounded one-to-four-worker execution, and aggregate progress.
 - A source-agnostic visual analyzer protocol and deterministic production registry,
-  intentionally empty until the first analyzer is implemented.
+  intentionally empty until the first analyzer is implemented, with explicit opt-in
+  semantics for analyzers whose successful result set may be empty.
 - Source-agnostic visual measurement and model-classification persistence with immutable
   analyzer/configuration identities, provenance, optional confidence, normalized geometry,
   transactional result snapshots, and durable per-asset run state.

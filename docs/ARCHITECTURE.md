@@ -173,6 +173,13 @@ normalized asset, an owned decoded Pillow image valid during the preview context
 immutable preview metadata. They do not receive provider clients, URLs, SQLite tables, or
 repository objects.
 
+Visual analyzers are nonempty-output by default. The analyzer contract may explicitly set
+`allows_empty_results` to true only when a successful empty result set has defined
+semantics. Otherwise empty output is a sanitized analyzer-output failure after normal
+preview cleanup. “Nothing detected” should ordinarily be represented by a deterministic
+result such as a zero count. An explicitly allowed empty completion still updates the
+successful snapshot timestamp and is skipped on a normal resume.
+
 One command processes one exact analyzer/configuration identity. Photographs are sorted by
 source ID before optional exact gallery-source-ID and recorded-year filters and the bounded
 asset limit. Claims occur inside workers immediately before preview access. Each worker

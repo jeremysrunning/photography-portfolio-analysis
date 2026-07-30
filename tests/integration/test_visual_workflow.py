@@ -89,6 +89,7 @@ class FakeAnalyzer:
     delay: float = 0
     started: threading.Event | None = None
     release: threading.Event | None = None
+    allows_empty_results: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def analyze(self, asset, image, metadata):
@@ -328,6 +329,132 @@ def test_corrupt_preview_and_analyzer_failure_are_failed_without_leaking_resourc
             AnalyzerIdentity("failing", "1", "defaults"),
         )
     assert snapshot.state.error_message == "The selected visual analyzer did not complete."
+
+
+def test_unexpected_empty_output_fails_after_cleanup_without_completed_snapshot(
+    tmp_path,
+) -> None:
+    portfolio, database = _saved(tmp_path)
+
+    class EmptyAnalyzer(FakeAnalyzer):
+        def analyze(self, asset, image, metadata):
+            return ()
+
+    sources = []
+
+    def source_factory(*_):
+        source = FakeSource()
+        sources.append(source)
+        return source
+
+    result = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        EmptyAnalyzer(),
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=source_factory,
+    )
+
+    assert result.failed == 1
+    assert result.completed == 0
+    assert sources[0].resources[0].closed
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot(
+            "smugmug",
+            "portfolio",
+            "photo-a",
+            AnalyzerIdentity("fake", "1", "defaults"),
+        )
+    assert snapshot.state.status is VisualRunStatus.FAILED
+    assert snapshot.state.error_category == "analyzer_output"
+    assert snapshot.state.error_message == (
+        "The selected visual analyzer returned no results unexpectedly."
+    )
+    assert not snapshot.state.has_successful_snapshot
+    assert snapshot.results == ()
+
+
+def test_empty_output_failed_refresh_preserves_previous_successful_snapshot(
+    tmp_path,
+) -> None:
+    portfolio, database = _saved(tmp_path)
+    analyzer = FakeAnalyzer()
+    run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=lambda *_: FakeSource(),
+    )
+    with SQLitePortfolioRepository(database) as repository:
+        before = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+
+    class EmptyAnalyzer(FakeAnalyzer):
+        def analyze(self, asset, image, metadata):
+            return ()
+
+    result = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        EmptyAnalyzer(),
+        options=VisualAnalysisOptions(limit=1, refresh=True),
+        source_factory=lambda *_: FakeSource(),
+    )
+
+    assert result.failed == 1
+    with SQLitePortfolioRepository(database) as repository:
+        after = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+    assert after.state.status is VisualRunStatus.FAILED
+    assert after.state.last_successful_completed_at == (before.state.last_successful_completed_at)
+    assert after.results == before.results
+
+
+def test_explicitly_allowed_empty_output_completes_and_resumes_as_complete(
+    tmp_path,
+) -> None:
+    portfolio, database = _saved(tmp_path)
+
+    class IntentionallyEmptyAnalyzer(FakeAnalyzer):
+        allows_empty_results = True
+
+        def analyze(self, asset, image, metadata):
+            return ()
+
+    analyzer = IntentionallyEmptyAnalyzer(allows_empty_results=True)
+    first = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=lambda *_: FakeSource(),
+    )
+    assert first.completed == 1
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+    assert snapshot.state.status is VisualRunStatus.COMPLETED
+    assert snapshot.state.has_successful_snapshot
+    assert snapshot.results == ()
+
+    resumed = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=lambda *_: FakeSource(),
+    )
+    assert resumed.completed == 0
+    assert resumed.already_completed == 1
 
 
 def test_transient_preview_retries_are_bounded_and_progress_includes_eta(tmp_path) -> None:

@@ -110,7 +110,7 @@ def test_visual_command_renders_aggregate_summary_without_asset_identifiers(
             running_elsewhere=1,
             completed=1,
             skipped=0,
-            failed=0,
+            failed=1,
             cancelled=0,
             remaining=1,
             elapsed_seconds=2,
@@ -135,6 +135,7 @@ def test_visual_command_renders_aggregate_summary_without_asset_identifiers(
     )
     output = capsys.readouterr().out
     assert "Running elsewhere or left running: 1" in output
+    assert "Failed during this run: 1" in output
     assert "Remaining: 1" in output
     assert "Recovery requires a separately scoped stale-run policy." in output
     assert "private-source-id" not in output

@@ -10,7 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from threading import Event
 
-from ppa.analysis.visual import VisualAnalyzer
+from ppa.analysis.visual import VisualAnalyzer, allows_empty_results
 from ppa.models import Asset, MediaType, Portfolio
 from ppa.sources import (
     GallerySource,
@@ -40,6 +40,10 @@ Sleeper = Callable[[float], None]
 
 class VisualWorkflowError(RuntimeError):
     """Raised when visual analysis cannot safely begin."""
+
+
+class _UnexpectedEmptyResults(RuntimeError):
+    """Raised when an analyzer violates its declared output contract."""
 
 
 class VisualOutcomeKind(StrEnum):
@@ -391,6 +395,8 @@ def _process_asset(
             with resource:
                 results = tuple(analyzer.analyze(asset, resource.image, resource.metadata))
                 downloaded_bytes = resource.metadata.downloaded_encoded_byte_count
+                if not results and not allows_empty_results(analyzer):
+                    raise _UnexpectedEmptyResults
             if event.is_set():
                 repository.cancel_visual_analysis(
                     portfolio.source_name,
@@ -461,6 +467,16 @@ def _process_asset(
                 analyzer.identity,
                 "preview_transient",
                 "Preview access failed after bounded retries.",
+            )
+            return _Outcome(VisualOutcomeKind.FAILED)
+        except _UnexpectedEmptyResults:
+            repository.fail_visual_analysis(
+                portfolio.source_name,
+                portfolio.source_id,
+                asset.source_id,
+                analyzer.identity,
+                "analyzer_output",
+                "The selected visual analyzer returned no results unexpectedly.",
             )
             return _Outcome(VisualOutcomeKind.FAILED)
         except Exception:

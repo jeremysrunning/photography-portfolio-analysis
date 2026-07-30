@@ -182,6 +182,11 @@ failures. Existing `running` work is never reclaimed automatically and is report
 running elsewhere or left running. Preview data remains temporary, while each completed
 asset result set is committed incrementally.
 
+Analyzers must normally emit at least one result. An analyzer may explicitly declare that
+an empty result set is a valid success; otherwise empty output is recorded as a failed
+analyzer-output attempt. Future detection analyzers should generally emit explicit zero
+counts rather than use empty output to mean that nothing was detected.
+
 Enrich the saved SmugMug dataset with public image metadata:
 
 ```powershell
