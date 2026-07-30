@@ -1,4 +1,6 @@
 import io
+import subprocess
+import sys
 import tempfile
 from email.message import Message
 from pathlib import Path
@@ -141,6 +143,18 @@ def test_preview_request_enforces_production_bounds() -> None:
         PreviewRequest(1025)
     with pytest.raises(ValueError, match="maximum_bytes"):
         PreviewRequest(256, maximum_bytes=PRODUCTION_PREVIEW_MAXIMUM_BYTES + 1)
+
+
+def test_validation_script_runs_directly_without_research_package_import() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/validate_preview_lifecycle.py", "--help"],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "sample-size" in result.stdout
 
 
 def test_memory_resource_returns_metadata_and_releases_decoded_image() -> None:

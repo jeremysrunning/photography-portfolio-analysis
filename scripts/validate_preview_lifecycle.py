@@ -3,19 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from collections import Counter
 from pathlib import Path
 from statistics import median
 
-from ppa.models import MediaType
+from ppa.models import Asset, MediaType, Portfolio
 from ppa.sources import PreviewRequest, PreviewStorageMode, SourceError
 from ppa.sources.smugmug import SmugMugSource
 from ppa.storage import SQLitePortfolioRepository
-from research.visual_preview.sampling import select_sample
 
 _EDGES = (256, 512, 1024)
+_SAMPLE_SEED = "issue-18-production-v1"
 
 
 def main() -> int:
@@ -40,7 +41,7 @@ def main() -> int:
     if portfolio.source_name != "smugmug":
         parser.error("production preview validation currently supports SmugMug")
 
-    sample = select_sample(portfolio, args.sample_size, seed="issue-18-production-v1")
+    sample = _select_photographs(portfolio, args.sample_size)
     source = SmugMugSource(portfolio.source_url, api_key)
     completed = 0
     failures: Counter[str] = Counter()
@@ -50,15 +51,13 @@ def main() -> int:
     byte_counts: list[int] = []
     residual_files = 0
 
-    for index, record in enumerate(sample):
-        if record.asset.media_type is not MediaType.PHOTOGRAPH:
-            continue
+    for index, asset in enumerate(sample):
         edge = _EDGES[index % len(_EDGES)]
         mode = PreviewStorageMode.TEMPORARY_FILE if index % 4 == 3 else PreviewStorageMode.MEMORY
         path: Path | None = None
         try:
             with source.open_preview(
-                record.asset,
+                asset,
                 PreviewRequest(edge, storage_mode=mode),
             ) as preview:
                 if mode is PreviewStorageMode.MEMORY:
@@ -94,6 +93,60 @@ def main() -> int:
     }
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if completed and not residual_files else 1
+
+
+def _select_photographs(portfolio: Portfolio, sample_size: int) -> tuple[Asset, ...]:
+    """Select deterministically across galleries without a research-package dependency."""
+    photographs = {
+        asset.source_id: asset
+        for asset in portfolio.assets
+        if asset.media_type is MediaType.PHOTOGRAPH
+    }
+    gallery_buckets: list[list[str]] = []
+    galleries = sorted(
+        portfolio.galleries,
+        key=lambda gallery: _sample_key(f"gallery:{gallery.source_id}"),
+    )
+    for gallery in galleries:
+        identifiers = {
+            placement.asset_source_id
+            for placement in gallery.placements
+            if placement.asset_source_id in photographs
+        }
+        if identifiers:
+            gallery_buckets.append(
+                sorted(identifiers, key=lambda source_id: _sample_key(f"asset:{source_id}"))
+            )
+
+    selected: list[str] = []
+    seen: set[str] = set()
+    offset = 0
+    while len(selected) < sample_size:
+        added = False
+        for bucket in gallery_buckets:
+            while offset < len(bucket) and bucket[offset] in seen:
+                bucket.pop(offset)
+            if offset < len(bucket):
+                source_id = bucket[offset]
+                selected.append(source_id)
+                seen.add(source_id)
+                added = True
+                if len(selected) == sample_size:
+                    break
+        if not added:
+            break
+        offset += 1
+
+    remaining = sorted(
+        (source_id for source_id in photographs if source_id not in seen),
+        key=lambda source_id: _sample_key(f"remaining:{source_id}"),
+    )
+    selected.extend(remaining[: sample_size - len(selected)])
+    return tuple(photographs[source_id] for source_id in selected)
+
+
+def _sample_key(value: str) -> str:
+    return hashlib.sha256(f"{_SAMPLE_SEED}:{value}".encode()).hexdigest()
 
 
 if __name__ == "__main__":
