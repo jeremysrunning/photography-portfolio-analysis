@@ -1,9 +1,11 @@
 """Storage contracts."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from ppa.models import JsonValue, MediaType, Portfolio
+from ppa.visual import AnalyzerIdentity, VisualAnalysisSnapshot, VisualResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,4 +98,86 @@ class PortfolioRepository(Protocol):
 
     def close(self) -> None:
         """Close datastore resources cleanly."""
+        ...
+
+
+@runtime_checkable
+class VisualAnalysisRepository(Protocol):
+    """Persist source-agnostic visual results and per-asset attempt state."""
+
+    def visual_analysis_snapshot(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+    ) -> VisualAnalysisSnapshot:
+        """Return current attempt state and the last successful result snapshot."""
+        ...
+
+    def claim_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        *,
+        retry_failed: bool = False,
+        refresh: bool = False,
+        at: datetime | None = None,
+    ) -> bool:
+        """Atomically claim an eligible exact identity for one attempt."""
+        ...
+
+    def complete_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        results: tuple[VisualResult, ...],
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Atomically replace results and complete the running attempt."""
+        ...
+
+    def fail_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        category: str,
+        message: str,
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Fail a running attempt without deleting a successful snapshot."""
+        ...
+
+    def cancel_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        category: str = "cancelled",
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Return a running attempt to retryable pending state."""
+        ...
+
+    def skip_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        reason: str,
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Skip a running attempt without creating completed results."""
         ...

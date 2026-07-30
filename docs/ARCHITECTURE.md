@@ -143,7 +143,7 @@ The ingestion boundary passes complete normalized `Portfolio` models to a source
 repository. SQLite has no knowledge of SmugMug, and analyzers have no knowledge of the
 relational schema.
 
-Schema version 5 stores portfolios, galleries, and unique assets in explicit relational
+Schema version 6 stores portfolios, galleries, and unique assets in explicit relational
 tables. A gallery-placement table records the many-to-many relationship between galleries
 and assets, including stable placement order. Source identifiers and URLs are explicit
 columns, as are media type, optional capture timestamp, and independently normalized native
@@ -151,11 +151,25 @@ and 35 mm-equivalent focal lengths. Flexible normalized metadata, EXIF, measurem
 observations, and findings use small JSON columns because their keys are intentionally
 extensible. No table accepts image bytes.
 
+Visual-analysis persistence is a separate application lifecycle rather than an extension
+of source enrichment. Its repository contract identifies work by portfolio, asset,
+analyzer name, analyzer version, and configuration version. The SQLite implementation
+stores current attempt state separately from the last successful result snapshot. Starting
+an explicit refresh retains that snapshot and its completion timestamp; only successful
+transactional completion replaces its results. Failed or cancelled refreshes therefore
+cannot destroy usable evidence or present it as newly completed.
+
+Cancellation returns a running attempt to `pending`, preserves the incremented attempt
+count, and records a sanitized interruption category and timestamp. A cancelled pending
+attempt requires an explicit retry claim. Older analyzer and configuration identities
+coexist indefinitely; there is no current-version, supersession, pruning, or automatic
+selection policy.
+
 Saves transactionally upsert records by source-scoped identity. The first normalized
 occurrence of a repeated asset supplies its canonical fields, matching analyzer
 deduplication. Records missing from later crawls are retained unless a future explicit
 synchronization operation is introduced. Empty incoming EXIF or measurements do not erase
-previous enrichment. Version-2, version-3, and version-4 databases migrate in place, and
+previous enrichment. Version-2 through version-5 databases migrate in place, and
 unsupported schema versions fail without being rewritten.
 
 The SmugMug adapter uses the supported public API with an API key and no OAuth. It follows

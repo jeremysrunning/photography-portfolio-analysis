@@ -1,6 +1,11 @@
 """Persistence abstractions and implementations."""
 
-from ppa.storage.base import EnrichmentStatus, EnrichmentTarget, PortfolioRepository
+from ppa.storage.base import (
+    EnrichmentStatus,
+    EnrichmentTarget,
+    PortfolioRepository,
+    VisualAnalysisRepository,
+)
 from ppa.storage.sqlite import SQLitePortfolioRepository, UnsupportedSchemaVersionError
 
 __all__ = [
@@ -9,4 +14,5 @@ __all__ = [
     "PortfolioRepository",
     "SQLitePortfolioRepository",
     "UnsupportedSchemaVersionError",
+    "VisualAnalysisRepository",
 ]
