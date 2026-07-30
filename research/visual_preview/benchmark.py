@@ -26,6 +26,7 @@ from research.visual_preview.sampling import sample_summary, select_sample
 from research.visual_preview.smugmug_sizes import ExperimentalSmugMugSizeResolver
 
 TARGET_EDGES = (256, 512, 768, 1024)
+VALID_DIMENSION_CLASSIFICATIONS = {"matching", "exif_orientation_swap"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +102,13 @@ def aggregate_results(
 ) -> dict[str, Any]:
     """Aggregate local records without retaining linkable per-image values."""
     successful = [record for record in records if record["status"] == "completed"]
+    dimension_mismatches = [
+        size
+        for record in records
+        for size in record["sizes"]
+        if size.get("dimension_classification") is not None
+        and size["dimension_classification"] not in VALID_DIMENSION_CLASSIFICATIONS
+    ]
     stage_names = ("download_seconds", "decode_seconds", "analysis_seconds")
     timing = {
         stage: _distribution([float(record[stage]) for record in successful])
@@ -154,9 +162,15 @@ def aggregate_results(
         "outcomes": {
             "completed": len(successful),
             "unavailable_or_invalid": len(records) - len(successful),
+            "dimension_mismatch_count": len(dimension_mismatches),
+            "dimension_mismatches_by_classification": _string_counts(
+                str(size["dimension_classification"]) for size in dimension_mismatches
+            ),
         },
         "actual_preview_edges": _counts(
-            int(size["actual_edge"]) for record in successful for size in record["sizes"]
+            int(size["decoded_edge"] if "decoded_edge" in size else size["actual_edge"])
+            for record in successful
+            for size in record["sizes"]
         ),
         "bytes_transferred": _distribution(transferred),
         "timing_seconds": timing,
@@ -199,6 +213,23 @@ def decode_preview(
         raise SourcePreviewUnavailableError(
             "Preview could not be decoded as a supported image."
         ) from error
+
+
+def classify_preview_dimensions(
+    decoded_size: tuple[int, int],
+    *,
+    requested_edge: int,
+    reported_width: int,
+    reported_height: int,
+) -> str:
+    """Classify decoded dimensions before any measurement is permitted."""
+    if max(decoded_size) > requested_edge:
+        return "decoded_exceeds_requested_edge"
+    if decoded_size == (reported_width, reported_height):
+        return "matching"
+    if decoded_size == (reported_height, reported_width):
+        return "exif_orientation_swap"
+    return "reported_decoded_dimension_mismatch"
 
 
 class PeakMemorySampler(AbstractContextManager["PeakMemorySampler"]):
@@ -262,23 +293,41 @@ def _benchmark_asset(
             started = time.perf_counter()
             image = decode_preview(payload.content, maximum_edge=configuration.maximum_edge)
             decode_seconds += time.perf_counter() - started
-            actual_edge = max(image.size)
-            if actual_edge > configuration.maximum_edge:
-                raise SourcePreviewUnavailableError(
-                    "Decoded preview exceeded the experimental maximum."
-                )
+            dimension_classification = classify_preview_dimensions(
+                image.size,
+                requested_edge=edge,
+                reported_width=payload.reported_width,
+                reported_height=payload.reported_height,
+            )
+            size_record = {
+                "requested_edge": edge,
+                "reported_width": payload.reported_width,
+                "reported_height": payload.reported_height,
+                "decoded_width": image.width,
+                "decoded_height": image.height,
+                "reported_edge": max(payload.reported_width, payload.reported_height),
+                "decoded_edge": max(image.size),
+                "dimension_classification": dimension_classification,
+                "content_type": payload.content_type,
+                "redirect_count": payload.redirect_count,
+            }
+            sizes.append(size_record)
+            if dimension_classification not in VALID_DIMENSION_CLASSIFICATIONS:
+                return {
+                    "sample_index": index,
+                    "status": "dimension_mismatch",
+                    "error_category": dimension_classification,
+                    "download_seconds": download_seconds,
+                    "decode_seconds": decode_seconds,
+                    "analysis_seconds": analysis_seconds,
+                    "bytes_transferred": bytes_transferred,
+                    "sizes": sizes,
+                    "measurements": {},
+                    "comparisons": [],
+                }
             started = time.perf_counter()
             measurements[edge] = measure_image(image)
             analysis_seconds += time.perf_counter() - started
-            sizes.append(
-                {
-                    "requested_edge": edge,
-                    "reported_edge": candidate.longest_edge,
-                    "actual_edge": actual_edge,
-                    "content_type": payload.content_type,
-                    "redirect_count": payload.redirect_count,
-                }
-            )
         reference_edge = max(configuration.requested_edges)
         reference = measurements[reference_edge]
         comparisons = [
@@ -358,3 +407,10 @@ def _counts(values) -> dict[str, int]:
         key = str(value)
         counts[key] = counts.get(key, 0) + 1
     return dict(sorted(counts.items(), key=lambda item: int(item[0])))
+
+
+def _string_counts(values) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for value in values:
+        counts[value] = counts.get(value, 0) + 1
+    return dict(sorted(counts.items()))

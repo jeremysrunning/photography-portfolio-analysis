@@ -118,8 +118,18 @@ counts may be published.
 ## Preview sizes and limits
 
 Requested longest edges are 256, 512, 768, and 1024 pixels. The resolver records both the
-provider-reported and decoded dimensions. It never upscales and rejects a provider size
-that exceeds the requested edge.
+provider-reported and decoded width and height. After EXIF orientation is applied, the
+decoded longest edge must not exceed the requested edge. Decoded width and height must
+match the reported dimensions exactly; the only tolerance is an exact width/height swap
+caused by EXIF orientation, which preserves the longest edge. There is no numeric pixel or
+percentage tolerance.
+
+A dimension mismatch is classified as either `decoded_exceeds_requested_edge` or
+`reported_decoded_dimension_mismatch`. The local raw output retains both dimension pairs
+and the classification. Aggregate output contains only mismatch counts by classification.
+Any asset with a mismatched requested preview is excluded from measurements and all
+cross-resolution stability calculations. The benchmark never silently resizes a provider
+response to make it conform.
 
 Experimental limits:
 
@@ -331,6 +341,9 @@ Required lifecycle behavior:
 - 8 MB encoded-byte ceiling initially, configurable downward by source
 - reject originals, archives, downloads, “largest” aliases, and decoded dimensions above
   the requested maximum
+- require decoded dimensions to match provider-reported dimensions exactly after
+  permitting only an EXIF-orientation width/height swap; classify and exclude mismatches
+  from analysis
 - HTTPS-only redirects, maximum three, with validation on every hop
 - separate unavailable/permanent, authentication, rate-limit, and transient failures
 - no URL, query, headers, cookies, credentials, or source identifiers in logs/errors

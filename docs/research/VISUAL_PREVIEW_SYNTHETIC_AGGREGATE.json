@@ -42,6 +42,8 @@
   ],
   "outcomes": {
     "completed": 8,
+    "dimension_mismatch_count": 0,
+    "dimension_mismatches_by_classification": {},
     "unavailable_or_invalid": 0
   },
   "packages": {

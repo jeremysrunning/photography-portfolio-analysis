@@ -47,8 +47,13 @@ def synthetic_aggregate() -> dict[str, object]:
                 sizes.append(
                     {
                         "requested_edge": edge,
-                        "reported_edge": edge,
-                        "actual_edge": max(decoded.size),
+                        "reported_width": resized.width,
+                        "reported_height": resized.height,
+                        "decoded_width": decoded.width,
+                        "decoded_height": decoded.height,
+                        "reported_edge": max(resized.size),
+                        "decoded_edge": max(decoded.size),
+                        "dimension_classification": "matching",
                         "content_type": "image/jpeg",
                         "redirect_count": 0,
                     }
