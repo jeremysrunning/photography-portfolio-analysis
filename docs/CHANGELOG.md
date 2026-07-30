@@ -25,6 +25,8 @@ The format is intentionally simple. This project values documenting the evolutio
 - Source-agnostic focal-length habits analysis with coverage-selected measurement basis,
   deterministic whole-millimeter frequency grouping, practical equivalent ranges, camera,
   native-lens, gallery, and yearly summaries, and optional CLI detail modes.
+- Resumable `ppa import` workflow that inspects a public portfolio, transactionally
+  persists normalized metadata, enriches EXIF, and reports precise staged outcomes.
 - Initial project vision and documentation.
 - Project roadmap.
 - Guiding principles.

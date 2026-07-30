@@ -91,6 +91,25 @@ $env:PPA_SMUGMUG_API_KEY = "your-api-key"
 ppa inspect https://example.smugmug.com --database portfolio.sqlite3
 ```
 
+Run the complete import workflow—inspection, transactional persistence, and resumable
+EXIF enrichment—with one command:
+
+```powershell
+$env:PPA_SMUGMUG_API_KEY = "your-api-key"
+ppa import https://example.smugmug.com --database portfolio.sqlite3
+```
+
+The database path is required. The command reports three visible stages and a final
+summary that distinguishes photographs enriched during the run, photographs already
+enriched, non-photo assets completed because EXIF is not applicable, failures, and
+remaining work. A rerun safely skips completed work. Use `--retry-failed` to include
+records whose earlier enrichment attempts failed.
+
+Inspection or persistence failure exits with status 1 and enrichment does not start.
+Partial item failure also exits with status 1; rate limiting exits with status 2.
+In either partial case, successful enrichment remains committed and the database remains
+usable and safe to resume.
+
 [SmugMug requires an API key](https://api.smugmug.com/api/v2/doc/tutorial/api-key.html)
 for public API requests. OAuth is not required for public data. The key can also be supplied
 with `--api-key`, although the environment variable avoids placing it in shell history.

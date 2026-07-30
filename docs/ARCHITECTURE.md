@@ -104,6 +104,8 @@ The reusable engine lives in the `ppa` package and has no user-interface depende
 - `ppa.analysis` contains source-agnostic analyzers, beginning with a metadata baseline.
 - `ppa.reports` renders analyzer results without reaching into source-specific data.
 - `ppa.cli` is a thin adapter over the library.
+- `ppa.core.workflows` composes inspection, persistence, and enrichment operations into
+  typed application-level results shared by standalone and end-to-end CLI commands.
 
 Portfolio, gallery, and asset identities are scoped by their source. The SQLite store
 persists source URLs and preview references, but never image bytes.
@@ -162,6 +164,13 @@ completed assets.
 
 This state is operational evidence, not a photographic measurement. Analysis continues to
 read EXIF only through normalized `Asset` models.
+
+The application import workflow preserves the same boundaries: it first obtains a complete
+normalized `Portfolio`, then passes that model to the repository's transactional save,
+and only starts per-asset enrichment after persistence succeeds. A failed save rolls back
+as a unit and leaves an existing usable database state intact. Enrichment remains
+incremental: each successful asset is committed independently so partial and rate-limited
+runs can resume without repeating completed work.
 
 SmugMug enrichment normalizes the confirmed `FocalLength` and `FocalLength35mm` fields at
 the source boundary. SQLite receives provider-independent typed millimeter values alongside
