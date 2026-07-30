@@ -237,6 +237,22 @@ These thresholds were defined before real-image results:
 Sharpness, blur, noise, depth-of-field, and subject-background separation do not receive a
 threshold before real evidence. No universal stability score is calculated.
 
+### Production palette-comparison methodology
+
+Issue #37 replaces rank-to-rank palette comparison for its generated and bounded
+production validation. With at most five colors, it exhaustively evaluates assignments
+and selects the minimum total normalized Euclidean encoded-sRGB color distance. Palette
+proportions do not affect assignment cost. Equal-cost assignments use lexicographic
+source and candidate indexes, so repeated comparisons are exact and deterministic.
+
+Unequal palettes are padded with unmatched entries. An unmatched color has normalized
+color-distance penalty `1.0`. After assignment, reported color distance is weighted by
+the mean mass of each matched or unmatched pair. Palette-proportion difference is half
+the assigned L1 distance, with an unmatched color compared to zero mass. Reordering a
+palette therefore has no effect, while missing low-proportion colors receive a bounded
+penalty. This helper is validation methodology only and is not persisted as a portfolio
+measurement.
+
 ## Synthetic stability findings
 
 The committed aggregate uses eight generated, non-identifying fixtures: solid, gradient,

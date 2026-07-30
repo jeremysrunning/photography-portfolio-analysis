@@ -170,7 +170,15 @@ $env:PPA_SMUGMUG_API_KEY = "your-api-key"
 ppa analyze visual portfolio.sqlite3 --analyzer ANALYZER_NAME
 ```
 
-No production visual analyzer is registered yet; Issue #37 will provide the first. Use
+The first production analyzer is `color-luminance`:
+
+```powershell
+ppa analyze visual portfolio.sqlite3 --analyzer color-luminance
+```
+
+It requests a bounded 768 px memory preview and records deterministic relative-luminance,
+encoded-sRGB saturation, direct Hasler–Süsstrunk colorfulness, luminance-tail, dominant
+palette, and palette-entropy measurements. Use
 `ppa analyze visual portfolio.sqlite3 --list-analyzers` for deterministic availability.
 The command processes one analyzer/configuration identity at a time, defaults to one
 worker, and accepts an explicit range of one through four. `--limit`, exact `--gallery`
@@ -186,6 +194,14 @@ Analyzers must normally emit at least one result. An analyzer may explicitly dec
 an empty result set is a valid success; otherwise empty output is recorded as a failed
 analyzer-output attempt. Future detection analyzers should generally emit explicit zero
 counts rather than use empty output to mean that nothing was detected.
+
+Color measurements describe the provider-rendered preview, not the original file. Version
+1 assumes the decoded channels represent sRGB, performs no ICC conversion, composites
+alpha against neutral mid-gray, and does not infer original-file clipping, available
+headroom, color intent, mood, or quality. The colorfulness value is the finite,
+nonnegative direct formula output for normalized-sRGB input; it is not a proportion,
+percentage, score, or universal perceptual scale and should be compared only within the
+same method version.
 
 Enrich the saved SmugMug dataset with public image metadata:
 

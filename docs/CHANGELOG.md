@@ -10,6 +10,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- The first production visual analyzer, `color-luminance`, with deterministic bounded
+  relative-luminance, saturation, colorfulness, luminance-tail, dominant-palette, and
+  palette-entropy measurements plus explicit rendered-preview limitations.
 - Resumable `ppa analyze visual` orchestration with deterministic photograph targeting,
   exact analyzer/configuration claims, bounded preview retries, incremental persistence,
   graceful cancellation, bounded one-to-four-worker execution, and aggregate progress.
