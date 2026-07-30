@@ -165,6 +165,39 @@ attempt requires an explicit retry claim. Older analyzer and configuration ident
 coexist indefinitely; there is no current-version, supersession, pruning, or automatic
 selection policy.
 
+## Visual Analysis Orchestration
+
+`ppa.core.visual_workflow` composes normalized assets, one registered visual analyzer,
+source-owned preview access, and the visual-analysis repository. Analyzers receive only a
+normalized asset, an owned decoded Pillow image valid during the preview context, and
+immutable preview metadata. They do not receive provider clients, URLs, SQLite tables, or
+repository objects.
+
+One command processes one exact analyzer/configuration identity. Photographs are sorted by
+source ID before optional exact gallery-source-ID and recorded-year filters and the bounded
+asset limit. Claims occur inside workers immediately before preview access. Each worker
+creates its own source/client and SQLite repository connection. The default is one worker;
+users may explicitly select one through four. The scheduler keeps at most that many asset
+passes in flight.
+
+Completed and skipped identities are retained unless refresh is explicit. Durable failures
+and cancellation-interrupted pending identities require explicit retry. Existing `running`
+identities are never reclaimed or mutated because schema version 6 has no lease, owner,
+heartbeat, or stale-run policy. They are reported separately. A future focused issue may
+define deliberate stale-run recovery. It must not be inferred from age alone without an
+ownership design.
+
+Missing previews are recorded as neutrally skipped. Corrupt, unsupported, oversized,
+dimension-mismatched, original-rejected, analyzer, and exhausted transient failures are
+recorded as failed. Authentication or authorization stops scheduling and returns the
+current claim to cancellation-interrupted pending. Rate limiting and transient preview
+access use bounded retries. Results complete only after the preview resource has closed,
+and each exact result set commits atomically.
+
+The production analyzer registry is intentionally empty until Issue #37. Compatible
+multi-analyzer preview sharing remains deferred until at least two real analyzers establish
+their preview, memory, failure, and partial-completion requirements.
+
 Saves transactionally upsert records by source-scoped identity. The first normalized
 occurrence of a repeated asset supplies its canonical fields, matching analyzer
 deduplication. Records missing from later crawls are retained unless a future explicit

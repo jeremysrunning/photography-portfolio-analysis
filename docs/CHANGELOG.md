@@ -10,6 +10,11 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- Resumable `ppa analyze visual` orchestration with deterministic photograph targeting,
+  exact analyzer/configuration claims, bounded preview retries, incremental persistence,
+  graceful cancellation, bounded one-to-four-worker execution, and aggregate progress.
+- A source-agnostic visual analyzer protocol and deterministic production registry,
+  intentionally empty until the first analyzer is implemented.
 - Source-agnostic visual measurement and model-classification persistence with immutable
   analyzer/configuration identities, provenance, optional confidence, normalized geometry,
   transactional result snapshots, and durable per-asset run state.
