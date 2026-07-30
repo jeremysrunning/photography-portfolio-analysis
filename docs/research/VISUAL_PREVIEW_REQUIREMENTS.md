@@ -323,6 +323,23 @@ Issue #38 should remain blocked on that evidence rather than treating “not eva
 
 ## Recommendations for Issue #18
 
+Issue #18 has adopted the following production decisions, superseding provisional
+contract-shape guidance in this section:
+
+- memory-backed resources return an owned decoded image and metadata only; encoded bytes
+  are released before return
+- temporary-file mode is explicit and returns an owned neutral OS path without retaining
+  a decoded image
+- production ceilings are 1,024 pixels and 8,000,000 encoded bytes
+- cooperative cancellation is an optional callback checked at source lifecycle boundaries
+- provider-reported and decoded dimensions use a conservative exact-match rule with an
+  exact EXIF-orientation width/height swap allowed
+
+The dimension consistency rule is intentionally conservative because a bounded real
+SmugMug size-details validation remains unavailable. It is not presented as empirically
+verified provider behavior. The requested and production size ceilings are independent
+safety requirements and are not subject to tolerance.
+
 The production contract should preserve source ownership while adding one bounded request
 and one returned descriptor:
 
