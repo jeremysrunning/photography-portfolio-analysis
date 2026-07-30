@@ -4,7 +4,7 @@ import json
 import sqlite3
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +23,16 @@ from ppa.models import (
     normalize_focal_length,
 )
 from ppa.storage.base import EnrichmentStatus, EnrichmentTarget
+from ppa.visual import (
+    AnalyzerIdentity,
+    VisualAnalysisSnapshot,
+    VisualResult,
+    VisualResultKind,
+    VisualRunState,
+    VisualRunStatus,
+)
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 _SCHEMA_STATEMENTS = (
     """
@@ -113,6 +121,69 @@ _SCHEMA_STATEMENTS = (
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS visual_analysis_runs (
+        source TEXT NOT NULL,
+        portfolio_source_id TEXT NOT NULL,
+        asset_source_id TEXT NOT NULL,
+        analyzer_name TEXT NOT NULL,
+        analyzer_version TEXT NOT NULL,
+        configuration_version TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (
+            status IN ('pending', 'running', 'completed', 'failed', 'skipped')
+        ),
+        attempts INTEGER NOT NULL CHECK (attempts >= 0),
+        started_at TEXT,
+        updated_at TEXT NOT NULL,
+        last_successful_completed_at TEXT,
+        error_category TEXT,
+        error_message TEXT,
+        interruption_category TEXT,
+        interrupted_at TEXT,
+        skip_reason TEXT,
+        PRIMARY KEY (
+            source, portfolio_source_id, asset_source_id,
+            analyzer_name, analyzer_version, configuration_version
+        ),
+        FOREIGN KEY (source, portfolio_source_id, asset_source_id)
+            REFERENCES assets(source, portfolio_source_id, source_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS visual_analysis_results (
+        source TEXT NOT NULL,
+        portfolio_source_id TEXT NOT NULL,
+        asset_source_id TEXT NOT NULL,
+        analyzer_name TEXT NOT NULL,
+        analyzer_version TEXT NOT NULL,
+        configuration_version TEXT NOT NULL,
+        result_name TEXT NOT NULL,
+        result_kind TEXT NOT NULL CHECK (
+            result_kind IN ('measurement', 'classification')
+        ),
+        value_json TEXT NOT NULL,
+        unit TEXT,
+        confidence REAL CHECK (
+            confidence IS NULL OR (confidence >= 0.0 AND confidence <= 1.0)
+        ),
+        method_name TEXT NOT NULL,
+        method_version TEXT NOT NULL,
+        model_name TEXT,
+        model_version TEXT,
+        completed_at TEXT NOT NULL,
+        PRIMARY KEY (
+            source, portfolio_source_id, asset_source_id,
+            analyzer_name, analyzer_version, configuration_version, result_name
+        ),
+        FOREIGN KEY (
+            source, portfolio_source_id, asset_source_id,
+            analyzer_name, analyzer_version, configuration_version
+        ) REFERENCES visual_analysis_runs(
+            source, portfolio_source_id, asset_source_id,
+            analyzer_name, analyzer_version, configuration_version
+        ) ON DELETE CASCADE
+    )
+    """,
+    """
     CREATE INDEX IF NOT EXISTS idx_galleries_portfolio_position
         ON galleries(source, portfolio_source_id, position)
     """,
@@ -120,6 +191,20 @@ _SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_placements_gallery_position
         ON gallery_placements(
             source, portfolio_source_id, gallery_source_id, position
+        )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_visual_runs_targeting
+        ON visual_analysis_runs(
+            source, portfolio_source_id, analyzer_name, analyzer_version,
+            configuration_version, status
+        )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_visual_results_identity
+        ON visual_analysis_results(
+            source, portfolio_source_id, analyzer_name, analyzer_version,
+            configuration_version, result_name
         )
     """,
 )
@@ -158,6 +243,19 @@ class SQLitePortfolioRepository:
         with connection:
             yield connection
 
+    @contextmanager
+    def _immediate_transaction(self) -> Iterator[sqlite3.Connection]:
+        """Serialize a read/claim/write decision across repository connections."""
+        connection = self._connect()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            yield connection
+        except BaseException:
+            connection.rollback()
+            raise
+        else:
+            connection.commit()
+
     def close(self) -> None:
         """Close the SQLite connection if one is open."""
         if self._connection is not None:
@@ -188,6 +286,9 @@ class SQLitePortfolioRepository:
         if current_version == 4:
             self._migrate_v4_to_v5(connection)
             current_version = 5
+        if current_version == 5:
+            self._migrate_v5_to_v6(connection)
+            current_version = 6
         if current_version != SCHEMA_VERSION:
             raise UnsupportedSchemaVersionError(
                 f"Unsupported SQLite schema version {current_version}; "
@@ -462,6 +563,366 @@ class SQLitePortfolioRepository:
             pending=int(row["pending"] or 0),
             completed=int(row["completed"] or 0),
             failed=int(row["failed"] or 0),
+        )
+
+    def visual_analysis_snapshot(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+    ) -> VisualAnalysisSnapshot:
+        """Return current state and results from the last successful completion."""
+        self.initialize()
+        connection = self._connect()
+        self._require_asset(connection, source, portfolio_source_id, asset_source_id)
+        key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
+        row = connection.execute(
+            """
+            SELECT * FROM visual_analysis_runs
+            WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+              AND analyzer_name = ? AND analyzer_version = ?
+              AND configuration_version = ?
+            """,
+            key,
+        ).fetchone()
+        if row is None:
+            return VisualAnalysisSnapshot(
+                identity,
+                VisualRunState(VisualRunStatus.PENDING, 0, None),
+            )
+        result_rows = connection.execute(
+            """
+            SELECT * FROM visual_analysis_results
+            WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+              AND analyzer_name = ? AND analyzer_version = ?
+              AND configuration_version = ?
+            ORDER BY result_name
+            """,
+            key,
+        ).fetchall()
+        return VisualAnalysisSnapshot(
+            identity,
+            self._read_visual_state(row),
+            tuple(self._read_visual_result(item) for item in result_rows),
+        )
+
+    def claim_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        *,
+        retry_failed: bool = False,
+        refresh: bool = False,
+        at: datetime | None = None,
+    ) -> bool:
+        """Atomically claim an eligible exact identity for one attempt."""
+        self.initialize()
+        timestamp = _timestamp(at)
+        key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
+        with self._immediate_transaction() as connection:
+            self._require_asset(connection, source, portfolio_source_id, asset_source_id)
+            row = connection.execute(
+                """
+                SELECT status, interruption_category
+                FROM visual_analysis_runs
+                WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+                  AND analyzer_name = ? AND analyzer_version = ?
+                  AND configuration_version = ?
+                """,
+                key,
+            ).fetchone()
+            if row is None:
+                connection.execute(
+                    """
+                    INSERT INTO visual_analysis_runs (
+                        source, portfolio_source_id, asset_source_id,
+                        analyzer_name, analyzer_version, configuration_version,
+                        status, attempts, started_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, 'running', 1, ?, ?)
+                    """,
+                    (*key, timestamp, timestamp),
+                )
+                return True
+            status = VisualRunStatus(row["status"])
+            eligible = (
+                (status is VisualRunStatus.PENDING and row["interruption_category"] is None)
+                or (status in {VisualRunStatus.PENDING, VisualRunStatus.FAILED} and retry_failed)
+                or (status in {VisualRunStatus.COMPLETED, VisualRunStatus.SKIPPED} and refresh)
+            )
+            if not eligible:
+                return False
+            connection.execute(
+                """
+                UPDATE visual_analysis_runs
+                SET status = 'running',
+                    attempts = attempts + 1,
+                    started_at = ?,
+                    updated_at = ?,
+                    error_category = NULL,
+                    error_message = NULL,
+                    interruption_category = NULL,
+                    interrupted_at = NULL,
+                    skip_reason = NULL
+                WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+                  AND analyzer_name = ? AND analyzer_version = ?
+                  AND configuration_version = ?
+                """,
+                (timestamp, timestamp, *key),
+            )
+            return True
+
+    def complete_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        results: tuple[VisualResult, ...],
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Atomically replace exact-identity results and complete the attempt."""
+        self.initialize()
+        names = [result.name for result in results]
+        if len(names) != len(set(names)):
+            raise ValueError("visual result names must be unique within one completion")
+        timestamp = _timestamp(at)
+        key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
+        with self._immediate_transaction() as connection:
+            self._require_running(connection, key)
+            connection.execute(
+                """
+                DELETE FROM visual_analysis_results
+                WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+                  AND analyzer_name = ? AND analyzer_version = ?
+                  AND configuration_version = ?
+                """,
+                key,
+            )
+            for result in results:
+                connection.execute(
+                    """
+                    INSERT INTO visual_analysis_results (
+                        source, portfolio_source_id, asset_source_id,
+                        analyzer_name, analyzer_version, configuration_version,
+                        result_name, result_kind, value_json, unit, confidence,
+                        method_name, method_version, model_name, model_version,
+                        completed_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        *key,
+                        result.name,
+                        result.kind.value,
+                        _json(result.value),
+                        result.unit,
+                        result.confidence,
+                        result.method_name,
+                        result.method_version,
+                        result.model_name,
+                        result.model_version,
+                        timestamp,
+                    ),
+                )
+            connection.execute(
+                """
+                UPDATE visual_analysis_runs
+                SET status = 'completed', updated_at = ?,
+                    last_successful_completed_at = ?,
+                    error_category = NULL, error_message = NULL,
+                    interruption_category = NULL, interrupted_at = NULL,
+                    skip_reason = NULL
+                WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+                  AND analyzer_name = ? AND analyzer_version = ?
+                  AND configuration_version = ?
+                """,
+                (timestamp, timestamp, *key),
+            )
+
+    def fail_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        category: str,
+        message: str,
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Fail the current attempt while retaining any successful snapshot."""
+        self._finish_visual_attempt(
+            source,
+            portfolio_source_id,
+            asset_source_id,
+            identity,
+            VisualRunStatus.FAILED,
+            at=at,
+            category=category,
+            message=message,
+        )
+
+    def cancel_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        category: str = "cancelled",
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Return a running attempt to pending while retaining interruption evidence."""
+        self._finish_visual_attempt(
+            source,
+            portfolio_source_id,
+            asset_source_id,
+            identity,
+            VisualRunStatus.PENDING,
+            at=at,
+            category=category,
+        )
+
+    def skip_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        reason: str,
+        *,
+        at: datetime | None = None,
+    ) -> None:
+        """Mark the running attempt skipped without creating results."""
+        self._finish_visual_attempt(
+            source,
+            portfolio_source_id,
+            asset_source_id,
+            identity,
+            VisualRunStatus.SKIPPED,
+            at=at,
+            message=reason,
+        )
+
+    def _finish_visual_attempt(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+        status: VisualRunStatus,
+        *,
+        at: datetime | None,
+        category: str | None = None,
+        message: str | None = None,
+    ) -> None:
+        timestamp = _timestamp(at)
+        key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
+        with self._immediate_transaction() as connection:
+            self._require_running(connection, key)
+            connection.execute(
+                """
+                UPDATE visual_analysis_runs
+                SET status = ?, updated_at = ?,
+                    error_category = ?, error_message = ?,
+                    interruption_category = ?, interrupted_at = ?,
+                    skip_reason = ?
+                WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+                  AND analyzer_name = ? AND analyzer_version = ?
+                  AND configuration_version = ?
+                """,
+                (
+                    status.value,
+                    timestamp,
+                    category if status is VisualRunStatus.FAILED else None,
+                    message[:1000] if status is VisualRunStatus.FAILED and message else None,
+                    category if status is VisualRunStatus.PENDING else None,
+                    timestamp if status is VisualRunStatus.PENDING else None,
+                    message[:1000] if status is VisualRunStatus.SKIPPED and message else None,
+                    *key,
+                ),
+            )
+
+    @staticmethod
+    def _visual_key(
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+        identity: AnalyzerIdentity,
+    ) -> tuple[str, str, str, str, str, str]:
+        return (
+            source,
+            portfolio_source_id,
+            asset_source_id,
+            identity.name,
+            identity.version,
+            identity.configuration_version,
+        )
+
+    @staticmethod
+    def _require_asset(
+        connection: sqlite3.Connection,
+        source: str,
+        portfolio_source_id: str,
+        asset_source_id: str,
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT 1 FROM assets
+            WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
+            """,
+            (source, portfolio_source_id, asset_source_id),
+        ).fetchone()
+        if row is None:
+            raise KeyError(f"asset not found: {asset_source_id}")
+
+    @staticmethod
+    def _require_running(
+        connection: sqlite3.Connection,
+        key: tuple[str, str, str, str, str, str],
+    ) -> None:
+        row = connection.execute(
+            """
+            SELECT status FROM visual_analysis_runs
+            WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+              AND analyzer_name = ? AND analyzer_version = ?
+              AND configuration_version = ?
+            """,
+            key,
+        ).fetchone()
+        if row is None or row["status"] != VisualRunStatus.RUNNING.value:
+            raise ValueError("visual analysis identity does not have a running attempt")
+
+    @staticmethod
+    def _read_visual_state(row: sqlite3.Row) -> VisualRunState:
+        return VisualRunState(
+            status=VisualRunStatus(row["status"]),
+            attempts=row["attempts"],
+            updated_at=_read_timestamp(row["updated_at"]),
+            started_at=_read_timestamp(row["started_at"]),
+            last_successful_completed_at=_read_timestamp(row["last_successful_completed_at"]),
+            error_category=row["error_category"],
+            error_message=row["error_message"],
+            interruption_category=row["interruption_category"],
+            interrupted_at=_read_timestamp(row["interrupted_at"]),
+            skip_reason=row["skip_reason"],
+        )
+
+    @staticmethod
+    def _read_visual_result(row: sqlite3.Row) -> VisualResult:
+        return VisualResult(
+            name=row["result_name"],
+            kind=VisualResultKind(row["result_kind"]),
+            value=json.loads(row["value_json"]),
+            unit=row["unit"],
+            confidence=row["confidence"],
+            method_name=row["method_name"],
+            method_version=row["method_version"],
+            model_name=row["model_name"],
+            model_version=row["model_version"],
         )
 
     @staticmethod
@@ -811,7 +1272,16 @@ class SQLitePortfolioRepository:
                 )
             connection.execute(
                 "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
-                (str(SCHEMA_VERSION),),
+                ("5",),
+            )
+
+    @staticmethod
+    def _migrate_v5_to_v6(connection: sqlite3.Connection) -> None:
+        with connection:
+            SQLitePortfolioRepository._create_schema(connection)
+            connection.execute(
+                "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
+                ("6",),
             )
 
     @staticmethod
@@ -837,6 +1307,17 @@ class SQLitePortfolioRepository:
 
 def _json(value: Any) -> str:
     return json.dumps(_mutable_json(value), separators=(",", ":"), sort_keys=True)
+
+
+def _timestamp(value: datetime | None) -> str:
+    timestamp = value or datetime.now(UTC)
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        raise ValueError("visual-analysis timestamps must be timezone-aware")
+    return timestamp.isoformat()
+
+
+def _read_timestamp(value: str | None) -> datetime | None:
+    return datetime.fromisoformat(value) if value is not None else None
 
 
 def _mutable_json(value: Any) -> Any:
