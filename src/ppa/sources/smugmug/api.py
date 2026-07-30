@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from ppa.sources.base import (
     SourceAuthenticationError,
+    SourceAuthorizationError,
     SourceError,
     SourceNotFoundError,
     SourceRateLimitError,
@@ -47,9 +48,11 @@ class UrlLibJsonTransport:
             with urlopen(request, timeout=self.timeout) as response:
                 value = json.load(response)
         except HTTPError as error:
-            if error.code in {401, 403}:
-                raise SourceAuthenticationError(
-                    "The source rejected the credentials or the resource is not public."
+            if error.code == 401:
+                raise SourceAuthenticationError("The source rejected the credentials.") from error
+            elif error.code == 403:
+                raise SourceAuthorizationError(
+                    "The source forbids access to this resource."
                 ) from error
             elif error.code == 404:
                 raise SourceNotFoundError("The source resource was not found.") from error
@@ -109,7 +112,17 @@ class SmugMugApiClient:
         document = self._get_json_with_retry(url)
         code = document.get("Code")
         if isinstance(code, int) and code >= 400:
-            raise SourceError(str(document.get("Message") or f"SmugMug API error {code}."))
+            if code == 401:
+                raise SourceAuthenticationError("The source rejected the credentials.")
+            if code == 403:
+                raise SourceAuthorizationError("The source forbids access to this resource.")
+            if code == 404:
+                raise SourceNotFoundError("The source resource was not found.")
+            if code == 429:
+                raise SourceRateLimitError()
+            if code >= 500:
+                raise SourceTransientError(f"SmugMug API error {code}.")
+            raise SourceError(f"SmugMug API error {code}.")
         response = document.get("Response")
         if not isinstance(response, dict):
             raise SourceError("SmugMug returned a response without normalized API data.")

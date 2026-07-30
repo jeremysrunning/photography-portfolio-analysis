@@ -10,6 +10,12 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- Source-agnostic bounded preview requests, immutable preview metadata, memory-first
+  decoded-image ownership, explicit temporary-file fallback, cooperative cancellation,
+  and idempotent lifecycle cleanup.
+- Production SmugMug preview resolution through official image-size metadata with
+  non-original selection, HTTPS and redirect checks, encoded-byte and content-type
+  enforcement, decoded-dimension validation, and sanitized failure categories.
 - Finalized normalized `SourceReference`, `AssetMetadata`, `MediaType`, and
   `GalleryPlacement` models with validated unique-asset ownership and explicit placement
   relationships.
@@ -57,6 +63,8 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Changed
 
+- Separated SmugMug authentication and authorization failures and removed
+  provider-supplied text from normalized API errors.
 - Aligned shared ingestion, SQLite loading, and analyzers on portfolio-owned unique assets
   and gallery-owned ordered placements; unknown media is no longer treated as photography.
 - Counted additional gallery placements relative only to distinct placed assets, so
@@ -71,7 +79,8 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Fixed
 
-- Nothing yet.
+- Kept temporary-file and memory-backed previews in the same EXIF-orientation-applied
+  pixel coordinate system, with explicit downloaded-versus-file encoding metadata.
 
 ---
 

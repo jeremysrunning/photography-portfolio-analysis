@@ -276,3 +276,63 @@ metadata is measured rather than interpreted.
 The database contains metadata, source references, and derived data only. The current
 storage API has no facility for persisting original image content. SmugMug inspection does
 not call image-size or media-download endpoints.
+
+## Temporary previews
+
+Production preview access is an opt-in library operation on `GallerySource`; normal
+inspection, import, enrichment, analysis, and reporting commands do not fetch image
+content. Callers provide a `PreviewRequest` with a maximum longest edge, encoded-byte
+limit, accepted image content types, and storage mode. The production hard limits are
+1,024 pixels and 8,000,000 encoded bytes.
+
+Memory mode is the default. The source downloads into a bounded internal buffer, closes
+the network response, decodes and validates the image, releases the encoded bytes, and
+returns a context-managed `PreviewResource` that owns only the decoded Pillow image and
+immutable metadata. Compatible future analyzers may share that image only while the
+resource context is open:
+
+```python
+from ppa.sources import PreviewRequest
+
+with source.open_preview(asset, PreviewRequest(maximum_edge=512)) as preview:
+    width, height = preview.image.size
+```
+
+Temporary-file mode must be requested explicitly with
+`PreviewStorageMode.TEMPORARY_FILE`. It returns an owned OS-managed path for a
+file-path-only library and does not retain a decoded image. The validated,
+EXIF-orientation-applied raster is encoded as PNG so file and memory modes expose the same
+pixel dimensions and coordinate orientation. `content_type` describes the exposed
+resource, while `downloaded_content_type`, `downloaded_encoded_byte_count`, and the
+optional `temporary_file_byte_count` keep transfer and re-encoded file facts distinct.
+The neutral random filename contains no source identifier, title, URL, or credential.
+Closing the resource deletes the path; cleanup is also performed for exceptions and
+cooperative cancellation. Cleanup cannot be guaranteed after forcible process termination.
+
+SmugMug preview access uses official image-size metadata, selects the closest supported
+non-original preview at or below the request, and never upscales or silently resizes.
+Original, download, archive, and ambiguous largest resources are rejected. HTTPS,
+redirect, content-type, byte, reported-dimension, and decoded-dimension limits are
+validated before a resource is returned. Reported and decoded dimensions currently must
+match exactly after allowing an exact EXIF-orientation width/height swap. This conservative
+consistency rule is not yet validated against a bounded real SmugMug sample and may be
+narrowed only with evidence; requested-edge and production ceilings will remain strict.
+
+Preview failures are source-agnostic. Rate limiting, temporary server responses, timeouts,
+and transport failures are retryable by a future orchestrator. Missing, unsupported,
+corrupt, original-like, oversized, or dimension-mismatched previews are permanent for the
+current asset unless its provider metadata changes. Authentication and authorization
+failures require configuration or access changes. Cancellation is reported separately.
+Preview access itself performs no retry and does not persist bytes, decoded images,
+temporary paths, provider media URLs, thumbnails, or analysis results.
+
+Run the aggregate-only bounded production validation locally against 12 photographs after
+setting the API key:
+
+```powershell
+$env:PPA_SMUGMUG_API_KEY = "your-api-key"
+python scripts/validate_preview_lifecycle.py jrp-import-test.sqlite3 --sample-size 12
+```
+
+The command rotates 256, 512, and 1,024 px requests, exercises both storage modes, emits
+only non-identifying aggregate counts, and writes no result file.

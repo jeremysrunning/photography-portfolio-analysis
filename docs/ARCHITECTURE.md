@@ -51,9 +51,30 @@ provider constructs portfolios, galleries, and assets through the same implement
 Metadata enrichment remains a separate operation so ingestion behavior and resumable
 enrichment do not become coupled.
 
-The source owns every preview handle. A handle is valid only inside its `with` block; the
-source must close the stream and remove any temporary backing file when the block exits.
-Originals and previews are never persisted by the contract.
+The source owns every preview lifecycle. A caller supplies a source-agnostic
+`PreviewRequest` containing a maximum longest edge, byte allowance, accepted content
+types, and memory or temporary-file storage mode. The source returns a context-managed
+`PreviewResource` with immutable `PreviewMetadata`.
+
+Memory mode owns one decoded image and deliberately releases encoded bytes before return.
+This keeps a single decoded preview shareable by compatible analyzers during one asset
+pass without retaining both encoded and decoded representations. Temporary-file mode is
+explicit and owns only a neutral OS-generated path for a file-path-only consumer. The
+source writes the orientation-applied decoded raster as PNG, so storage mode does not
+change pixel dimensions or the visual coordinate system. Metadata distinguishes the
+downloaded content type and byte count from the exposed file content type and re-encoded
+file byte count. Closing the resource closes its image or deletes its path idempotently.
+Network responses never escape the source lifecycle.
+
+The contract caps production previews at a 1,024-pixel longest edge and 8,000,000 encoded
+bytes. Sources must select a non-original candidate at or below the request, validate
+redirects and content, decode and verify actual dimensions, and reject material
+provider/decoded disagreement. Cooperative cancellation uses only an optional callback;
+orchestration policy remains outside the source layer.
+
+Preview metadata and resources are operational, source-level types rather than normalized
+domain entities. Preview bytes, decoded images, temporary paths, and provider media URLs
+never cross the SQLite boundary. Normal metadata ingestion never opens a preview.
 
 ## Ingestion
 
@@ -143,8 +164,20 @@ album and album-image links, and retains empty public albums. Explicitly private
 or password-protected nodes are not traversed. Rate limits and transient transport failures
 use bounded retries with capped delays. Discovery and retry progress is emitted through
 structured logging. The adapter does not call raw image-size endpoints or download
-previews. This keeps public-site discovery source-specific while producing the same
-normalized dataset expected by future sources.
+previews during discovery or enrichment. Explicit preview requests follow the official
+`ImageSizeDetails` link, select a bounded non-original resource, and use a separate media
+transport whose response is closed before returning an owned resource. This keeps
+public-site discovery source-specific while producing the same normalized dataset
+expected by future sources.
+
+## Temporary Preview Failures
+
+The source exception hierarchy distinguishes retryable rate-limit, server, timeout, and
+transport failures from asset-local missing, unsupported, corrupt, oversized,
+original-rejected, and dimension-mismatch failures. Authentication and authorization are
+configuration/access failures. Cooperative cancellation has its own sanitized category.
+Issue #36 may use these categories for retry policy; Issue #18 performs no retries,
+orchestration, or persistence.
 
 The baseline analyzer operates only on normalized models. It measures dataset shape,
 duplicate gallery placements, metadata coverage, capture range, orientation, formats, and

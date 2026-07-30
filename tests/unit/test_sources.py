@@ -1,12 +1,11 @@
 import logging
 from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import replace
 from io import BytesIO
-from typing import BinaryIO
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from PIL import Image
 
 from ppa.models import (
     Asset,
@@ -18,6 +17,11 @@ from ppa.models import (
 )
 from ppa.sources import (
     GallerySource,
+    PreviewMetadata,
+    PreviewRequest,
+    PreviewResource,
+    PreviewStorageMode,
+    SourceAuthorizationError,
     SourceError,
     SourcePreviewUnavailableError,
     SourceRateLimitError,
@@ -77,13 +81,30 @@ class FakeGallerySource:
             metadata=replace(asset.metadata, exif={**asset.exif, "Model": "Fake camera"}),
         )
 
-    @contextmanager
-    def open_preview(self, asset: Asset) -> Iterator[BinaryIO]:
+    def open_preview(
+        self,
+        asset: Asset,
+        request: PreviewRequest,
+        *,
+        is_cancelled=None,
+    ) -> PreviewResource:
         if not asset.preview_url:
             raise SourcePreviewUnavailableError("Preview is unavailable.")
         self.preview_stream = BytesIO(b"preview")
-        with self.preview_stream:
-            yield self.preview_stream
+        image = Image.new("RGB", (64, 48))
+        return PreviewResource.memory(
+            PreviewMetadata(
+                requested_maximum_edge=request.maximum_edge,
+                width=64,
+                height=48,
+                content_type="image/jpeg",
+                downloaded_content_type="image/jpeg",
+                downloaded_encoded_byte_count=7,
+                provenance="fake",
+                storage_mode=PreviewStorageMode.MEMORY,
+            ),
+            image,
+        )
 
 
 def test_fake_source_exercises_complete_gallery_source_contract() -> None:
@@ -96,11 +117,10 @@ def test_fake_source_exercises_complete_gallery_source_contract() -> None:
     asset = next(source.iter_assets(gallery))
     assert source.enrich_asset_metadata(asset).exif == {"Model": "Fake camera"}
 
-    with source.open_preview(asset) as preview:
-        assert preview.read() == b"preview"
+    with source.open_preview(asset, PreviewRequest(128)) as preview:
+        assert preview.image.size == (64, 48)
         assert not preview.closed
-    assert source.preview_stream is not None
-    assert source.preview_stream.closed
+    assert preview.closed
 
     loaded = load_portfolio(source)
     assert loaded.assets == (asset,)
@@ -126,7 +146,7 @@ def test_fake_source_normalizes_unavailable_preview() -> None:
 
     with (
         pytest.raises(SourcePreviewUnavailableError, match="unavailable"),
-        source.open_preview(asset),
+        source.open_preview(asset, PreviewRequest(128)),
     ):
         pass
 
@@ -308,6 +328,7 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
     assert completed.galleries_discovered == 2
     assert completed.restricted_nodes_skipped == 1
     assert all(parse_qs(urlsplit(url).query)["APIKey"] == ["secret"] for url in transport.urls)
+    assert all("sizedetails" not in url.casefold() for url in transport.urls)
 
     asset = portfolio.assets[0]
     enriched = source.enrich_asset_metadata(asset)
@@ -319,11 +340,6 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
     }
     assert enriched.metadata.focal_length_mm == 52.5
     assert enriched.metadata.focal_length_35mm == 78.75
-    with (
-        pytest.raises(SourcePreviewUnavailableError, match="no public preview URL"),
-        source.open_preview(asset),
-    ):
-        pass
 
 
 def test_partial_enrichment_preserves_existing_typed_focal_lengths() -> None:
@@ -419,6 +435,24 @@ def test_smugmug_client_stops_after_bounded_retries() -> None:
     with pytest.raises(SourceTransientError, match="still unavailable"):
         client.get_response("/resource")
     assert transport.calls == 2
+
+
+def test_smugmug_api_forbidden_error_is_classified_and_sanitized() -> None:
+    transport = FakeTransport(
+        {
+            "/resource": {
+                "Code": 403,
+                "Message": "Forbidden https://cdn.example.test/image.jpg?token=secret",
+                "Response": {},
+            }
+        }
+    )
+    client = SmugMugApiClient("https://example.smugmug.com", "secret", transport)
+
+    with pytest.raises(SourceAuthorizationError) as raised:
+        client.get_response("/resource")
+
+    assert "token=secret" not in str(raised.value)
 
 
 def test_smugmug_client_rejects_repeated_pagination_link() -> None:
