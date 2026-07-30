@@ -163,6 +163,30 @@ Generate the source-agnostic metadata baseline:
 ppa report baseline portfolio.sqlite3
 ```
 
+Run one registered visual analyzer resumably over persisted photographs:
+
+```powershell
+$env:PPA_SMUGMUG_API_KEY = "your-api-key"
+ppa analyze visual portfolio.sqlite3 --analyzer ANALYZER_NAME
+```
+
+No production visual analyzer is registered yet; Issue #37 will provide the first. Use
+`ppa analyze visual portfolio.sqlite3 --list-analyzers` for deterministic availability.
+The command processes one analyzer/configuration identity at a time, defaults to one
+worker, and accepts an explicit range of one through four. `--limit`, exact `--gallery`
+source ID, and recorded `--year` filters are applied after deterministic asset sorting.
+
+Completed work is skipped unless `--refresh` is supplied. `--retry-failed` includes durable
+failures and cancellation-interrupted pending work; `--only-failed` includes only durable
+failures. Existing `running` work is never reclaimed automatically and is reported as
+running elsewhere or left running. Preview data remains temporary, while each completed
+asset result set is committed incrementally.
+
+Analyzers must normally emit at least one result. An analyzer may explicitly declare that
+an empty result set is a valid success; otherwise empty output is recorded as a failed
+analyzer-output attempt. Future detection analyzers should generally emit explicit zero
+counts rather than use empty output to mean that nothing was detected.
+
 Enrich the saved SmugMug dataset with public image metadata:
 
 ```powershell
