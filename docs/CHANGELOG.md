@@ -94,6 +94,11 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Research
 
+- Added an isolated visual-preview requirements benchmark with deterministic metadata
+  sampling, bounded experimental SmugMug size access, in-memory deterministic statistics,
+  spectral-residual saliency, aggregate-only synthetic results, and explicit guidance for
+  temporary preview lifecycle and later visual-analysis issues.
+
 #### New Questions
 
 - How accurately can subject placement be measured?

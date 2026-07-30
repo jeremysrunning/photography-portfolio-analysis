@@ -75,6 +75,16 @@ python -m pytest
 python -m ruff check .
 ```
 
+The optional visual-preview research tools require:
+
+```console
+python -m pip install -e ".[dev,research]"
+```
+
+They are isolated under `research/` and are not part of the production `ppa` command
+surface. See `docs/research/VISUAL_PREVIEW_REQUIREMENTS.md` for the bounded local command,
+privacy rules, aggregate-only result policy, and current unverified findings.
+
 Pull requests targeting `main` run the same tests, lint, and formatting checks in GitHub
 Actions on Python 3.12. The `CI / quality` check must pass before a pull request can merge.
 
