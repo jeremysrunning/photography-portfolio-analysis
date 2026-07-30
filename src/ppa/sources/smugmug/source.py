@@ -2,13 +2,10 @@
 
 import logging
 from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime
-from typing import Any, BinaryIO
-from urllib.error import HTTPError, URLError
+from typing import Any
 from urllib.parse import urlsplit
-from urllib.request import Request, urlopen
 
 from ppa.models import (
     Asset,
@@ -20,11 +17,12 @@ from ppa.models import (
     normalize_focal_length,
 )
 from ppa.sources.base import (
-    SourceAuthenticationError,
+    CancellationCheck,
     SourceError,
-    SourcePreviewUnavailableError,
 )
+from ppa.sources.preview import PreviewRequest, PreviewResource
 from ppa.sources.smugmug.api import SmugMugApiClient
+from ppa.sources.smugmug.preview import SmugMugPreviewService
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +34,7 @@ class SmugMugSource:
     portfolio_url: str
     api_key: str
     client: SmugMugApiClient | None = None
+    preview_service: SmugMugPreviewService | None = None
     _root_node_uri: str | None = field(default=None, init=False, repr=False)
     _album_images_uris: dict[str, str] = field(default_factory=dict, init=False, repr=False)
 
@@ -121,32 +120,19 @@ class SmugMugSource:
             ),
         )
 
-    @contextmanager
-    def open_preview(self, asset: Asset) -> Iterator[BinaryIO]:
-        """Open a source-owned preview stream and close it on context exit."""
-        if not asset.preview_url:
-            raise SourcePreviewUnavailableError(
-                f"Asset {asset.source_id!r} has no public preview URL."
-            )
-        request = Request(
-            asset.preview_url,
-            headers={"User-Agent": "photography-portfolio-analysis/0.1"},
-        )
-        try:
-            with urlopen(request, timeout=30.0) as response:
-                yield response
-        except HTTPError as error:
-            if error.code in {401, 403}:
-                raise SourceAuthenticationError(
-                    "The source rejected access to the temporary preview."
-                ) from error
-            if error.code == 404:
-                raise SourcePreviewUnavailableError(
-                    f"Asset {asset.source_id!r} preview was not found."
-                ) from error
-            raise SourceError(f"Preview request returned HTTP {error.code}.") from error
-        except (URLError, TimeoutError) as error:
-            raise SourceError("Could not open the temporary preview.") from error
+    def open_preview(
+        self,
+        asset: Asset,
+        request: PreviewRequest,
+        *,
+        is_cancelled: CancellationCheck | None = None,
+    ) -> PreviewResource:
+        """Return one validated source-owned temporary preview."""
+        service = self.preview_service
+        if service is None:
+            client = self.client or SmugMugApiClient(self.portfolio_url, self.api_key)
+            service = SmugMugPreviewService(client)
+        return service.open_preview(asset, request, is_cancelled=is_cancelled)
 
     def _walk_node(
         self,

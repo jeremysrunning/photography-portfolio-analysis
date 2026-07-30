@@ -1,10 +1,10 @@
 """Contracts implemented by portfolio sources."""
 
 from collections.abc import Iterator
-from contextlib import AbstractContextManager
-from typing import BinaryIO, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from ppa.models import Asset, Gallery, Portfolio
+from ppa.sources.preview import CancellationCheck, PreviewRequest, PreviewResource
 
 
 class SourceNotImplementedError(NotImplementedError):
@@ -19,12 +19,44 @@ class SourceAuthenticationError(SourceError):
     """Raised when a source rejects or requires credentials."""
 
 
+class SourceAuthorizationError(SourceError):
+    """Raised when credentials cannot access a source resource."""
+
+
 class SourceNotFoundError(SourceError):
     """Raised when a requested source resource does not exist."""
 
 
 class SourcePreviewUnavailableError(SourceError):
     """Raised when an asset has no accessible temporary preview."""
+
+
+class SourcePreviewUnsupportedContentTypeError(SourcePreviewUnavailableError):
+    """Raised when preview content is missing or uses a disallowed media type."""
+
+
+class SourcePreviewPayloadTooLargeError(SourcePreviewUnavailableError):
+    """Raised when encoded preview content exceeds the requested byte limit."""
+
+
+class SourcePreviewDimensionsTooLargeError(SourcePreviewUnavailableError):
+    """Raised when reported or decoded dimensions exceed a safety bound."""
+
+
+class SourcePreviewOriginalRejectedError(SourcePreviewUnavailableError):
+    """Raised when a provider offers or redirects to original-resolution media."""
+
+
+class SourcePreviewDimensionMismatchError(SourcePreviewUnavailableError):
+    """Raised when provider-reported and decoded dimensions materially disagree."""
+
+
+class SourcePreviewDecodeError(SourcePreviewUnavailableError):
+    """Raised when preview bytes cannot be decoded safely."""
+
+
+class SourcePreviewCancelledError(SourceError):
+    """Raised after cancellation requests stop temporary preview access."""
 
 
 class SourceRateLimitError(SourceError):
@@ -75,6 +107,12 @@ class GallerySource(Protocol):
         """
         ...
 
-    def open_preview(self, asset: Asset) -> AbstractContextManager[BinaryIO]:
-        """Open a temporary binary preview owned and cleaned up by the source."""
+    def open_preview(
+        self,
+        asset: Asset,
+        request: PreviewRequest,
+        *,
+        is_cancelled: CancellationCheck | None = None,
+    ) -> PreviewResource:
+        """Return one bounded, validated preview with explicit ownership."""
         ...
