@@ -13,8 +13,16 @@ from ppa.analysis import (
     analyze_equipment,
     analyze_focal_lengths,
     analyze_timeline,
+    get_visual_analyzer,
+    list_visual_analyzers,
 )
 from ppa.core.logging import configure_logging
+from ppa.core.visual_workflow import (
+    VisualAnalysisOptions,
+    VisualProgress,
+    VisualWorkflowError,
+    run_visual_analysis,
+)
 from ppa.core.workflows import (
     EnrichmentSnapshot,
     ExifWorkflowResult,
@@ -151,6 +159,39 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include complete per-gallery timeline distributions.",
     )
+    analyze = commands.add_parser("analyze", help="Run persisted portfolio analyzers.")
+    analyze_commands = analyze.add_subparsers(dest="analyze_command", required=True)
+    visual = analyze_commands.add_parser(
+        "visual",
+        help="Run one resumable visual analyzer over stored photographs.",
+    )
+    _add_database_selection(visual)
+    visual.add_argument("--analyzer", help="Exact registered visual analyzer name.")
+    visual.add_argument("--list-analyzers", action="store_true")
+    visual.add_argument(
+        "--api-key",
+        default=os.environ.get("PPA_SMUGMUG_API_KEY"),
+        help="SmugMug API key (prefer PPA_SMUGMUG_API_KEY).",
+    )
+    visual.add_argument("--limit", type=int, help="Maximum sorted photographs to select.")
+    visual.add_argument(
+        "--workers", type=int, default=1, help="Concurrent asset workers (1-4; default: 1)."
+    )
+    visual.add_argument("--refresh", action="store_true", help="Refresh completed work.")
+    visual.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry failed and cancellation-interrupted pending work.",
+    )
+    visual.add_argument(
+        "--only-failed", action="store_true", help="Select only durable failed work."
+    )
+    visual.add_argument(
+        "--gallery",
+        dest="gallery_source_id",
+        help="Select this exact gallery source ID.",
+    )
+    visual.add_argument("--year", type=int, help="Select this recorded capture year.")
     enrich = commands.add_parser("enrich", help="Add source metadata to a saved dataset.")
     enrich_commands = enrich.add_subparsers(dest="enrich_command", required=True)
     exif = enrich_commands.add_parser(
@@ -218,6 +259,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "import requires --api-key or the PPA_SMUGMUG_API_KEY environment variable"
             )
         return _import_portfolio(args)
+    if args.command == "analyze" and args.analyze_command == "visual":
+        return _analyze_visual(args, parser)
     if args.command in {"show", "report"}:
         try:
             portfolio = _load_stored_portfolio(args.database, args.source, args.source_id)
@@ -509,6 +552,115 @@ def _print_resume_guidance() -> None:
     print("The database remains usable and successful enrichment was preserved.")
     print("The import can be resumed safely by running the same command again.")
     print("Use --retry-failed when failed records need another attempt.")
+
+
+def _analyze_visual(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    names = list_visual_analyzers()
+    if args.list_analyzers:
+        if names:
+            print("Registered visual analyzers:")
+            for name in names:
+                print(f"  {name}")
+        else:
+            print("No production visual analyzers are registered.")
+        return 0
+    if not names:
+        print("No production visual analyzers are registered.")
+        print("Issue #37 will provide the first production analyzer.")
+        return 1
+    if not args.analyzer:
+        parser.error("analyze visual requires --analyzer")
+    analyzer = get_visual_analyzer(args.analyzer)
+    if analyzer is None:
+        print(f"Unknown visual analyzer: {args.analyzer}")
+        print("Registered visual analyzers: " + ", ".join(names))
+        return 1
+    if not args.api_key:
+        parser.error(
+            "analyze visual requires --api-key or the PPA_SMUGMUG_API_KEY environment variable"
+        )
+    try:
+        options = VisualAnalysisOptions(
+            limit=args.limit,
+            workers=args.workers,
+            refresh=args.refresh,
+            retry_failed=args.retry_failed,
+            only_failed=args.only_failed,
+            gallery_source_id=args.gallery_source_id,
+            capture_year=args.year,
+        )
+        portfolio = _load_stored_portfolio(args.database, args.source, args.source_id)
+    except (OSError, SourceError, ValueError, VisualWorkflowError):
+        logger.error("visual_analysis_setup_failed")
+        print("Visual analysis did not start: database or selection configuration is invalid.")
+        return 1
+
+    def show_progress(progress: VisualProgress) -> None:
+        rate = (
+            f"{progress.processing_rate:.2f}/s"
+            if progress.processing_rate is not None
+            else "not yet meaningful"
+        )
+        eta = (
+            _format_elapsed(progress.estimated_seconds_remaining)
+            if progress.estimated_seconds_remaining is not None
+            else "not yet meaningful"
+        )
+        print(
+            f"Processed {progress.processed:,} / {progress.selected:,}: "
+            f"{progress.completed:,} completed, {progress.skipped:,} skipped, "
+            f"{progress.failed:,} failed; rate {rate}; ETA {eta}"
+        )
+
+    try:
+        result = run_visual_analysis(
+            portfolio,
+            args.database,
+            args.api_key,
+            analyzer,
+            options=options,
+            progress=show_progress,
+        )
+    except VisualWorkflowError:
+        logger.error("visual_analysis_setup_failed")
+        print("Visual analysis did not start: source preview access is unavailable.")
+        return 1
+
+    print("Visual analysis summary")
+    print(f"  Analyzer: {analyzer.identity.name}")
+    print(f"  Analyzer version: {analyzer.identity.version}")
+    print(f"  Configuration version: {analyzer.identity.configuration_version}")
+    print(f"  Eligible photographs: {result.eligible_photographs:,}")
+    print(f"  Selected photographs: {result.selected_photographs:,}")
+    print(f"  Completed during this run: {result.completed:,}")
+    print(f"  Already completed: {result.already_completed:,}")
+    print(f"  Skipped during this run: {result.skipped:,}")
+    print(f"  Previously skipped: {result.existing_skipped:,}")
+    print(f"  Failed during this run: {result.failed:,}")
+    print(f"  Existing failed: {result.existing_failed:,}")
+    print(f"  Running elsewhere or left running: {result.running_elsewhere:,}")
+    print(f"  Cancellation-interrupted: {result.cancelled:,}")
+    print(f"  Remaining: {result.remaining:,}")
+    print(f"  Downloaded preview bytes: {result.downloaded_bytes:,}")
+    print(f"  Elapsed: {_format_elapsed(result.elapsed_seconds)}")
+    if result.processing_rate is None:
+        print("  Processing rate: not yet meaningful")
+    else:
+        print(f"  Processing rate: {result.processing_rate:.2f} photographs/second")
+    if result.running_elsewhere:
+        print(
+            "Running work was not reclaimed. Recovery requires a separately scoped "
+            "stale-run policy."
+        )
+    if result.cancelled or result.failed or result.remaining:
+        print("Completed results were preserved and the database can be resumed safely.")
+    if result.rate_limited:
+        return 2
+    if result.configuration_failed:
+        return 1
+    if result.cancelled_by_user:
+        return 130
+    return 1 if result.failed or result.remaining else 0
 
 
 def _format_elapsed(seconds: float) -> str:

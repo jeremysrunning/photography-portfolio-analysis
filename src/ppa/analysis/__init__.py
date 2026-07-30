@@ -19,6 +19,12 @@ from ppa.analysis.timeline import (
     YearChange,
     analyze_timeline,
 )
+from ppa.analysis.visual import (
+    VisualAnalyzer,
+    get_visual_analyzer,
+    list_visual_analyzers,
+    register_visual_analyzer,
+)
 
 __all__ = [
     "BaselineReport",
@@ -34,10 +40,14 @@ __all__ = [
     "PeriodCount",
     "TimelineReport",
     "TimelineSegment",
+    "VisualAnalyzer",
     "YearChange",
     "YearlyCamera",
     "analyze_baseline",
     "analyze_equipment",
     "analyze_focal_lengths",
     "analyze_timeline",
+    "get_visual_analyzer",
+    "list_visual_analyzers",
+    "register_visual_analyzer",
 ]
