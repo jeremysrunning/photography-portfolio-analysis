@@ -61,8 +61,8 @@ def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys)
         def iter_assets(self, gallery: Gallery) -> Iterator[Asset]:
             yield from portfolio.gallery_assets(gallery)
 
-    cli_module = import_module("ppa.cli.main")
-    monkeypatch.setattr(cli_module, "SmugMugSource", FakeSource)
+    workflows_module = import_module("ppa.core.workflows")
+    monkeypatch.setattr(workflows_module, "SmugMugSource", FakeSource)
     database = tmp_path / "portfolio.sqlite3"
 
     result = main(
@@ -208,8 +208,8 @@ def test_enrich_exif_updates_saved_asset(monkeypatch, tmp_path, capsys) -> None:
                 }
             }
 
-    cli_module = import_module("ppa.cli.main")
-    monkeypatch.setattr(cli_module, "SmugMugApiClient", FakeClient)
+    workflows_module = import_module("ppa.core.workflows")
+    monkeypatch.setattr(workflows_module, "SmugMugApiClient", FakeClient)
 
     assert (
         main(
