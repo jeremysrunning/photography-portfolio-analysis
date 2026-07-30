@@ -124,9 +124,30 @@ duplicate portfolio identities, duplicate gallery placements, or placements that
 reference unknown assets. Validation uses standard-library dataclasses and does not
 introduce a validation framework.
 
+## Visual Analysis Results
+
+Visual analysis uses a separate application-level contract and does not expand the legacy
+`Measurement`, `Observation`, or `Finding` types. Each result belongs to an immutable
+identity consisting of analyzer name, analyzer version, and configuration version. A
+result has a unique name, a deterministic-measurement or model-classification kind, a
+non-null JSON-compatible value, method provenance, and optional unit, model provenance,
+and classification confidence.
+
+Confidence `0.0` is recorded evidence. `None` means the method did not provide confidence.
+An absent result row means the measurement or classification is missing. Deterministic
+measurements do not carry confidence. Normalized points and top-left-origin bounding boxes
+use coordinates in `[0, 1]`; bounding boxes must remain within the image frame.
+
+Each exact asset/analyzer/configuration identity has a current status: `pending`,
+`running`, `completed`, `failed`, or `skipped`. `last_successful_completed_at` identifies
+the stored result snapshot. During a refresh, failure, or cancellation, readers can
+therefore distinguish an older successful snapshot from the current incomplete attempt.
+Cancellation returns the identity to `pending`, retains its incremented attempt count, and
+records an interruption category and timestamp. Its next claim requires explicit retry.
+
 ## Persistence Round Trips
 
-SQLite schema version 5 mirrors the normalized graph:
+SQLite schema version 6 mirrors the normalized graph:
 
 - portfolios and source references use explicit columns
 - galleries are stored independently from assets
@@ -135,11 +156,14 @@ SQLite schema version 5 mirrors the normalized graph:
 - media type, nullable capture timestamps, and nullable native and 35 mm-equivalent focal
   lengths use explicit columns
 - extensible metadata, EXIF, measurements, observations, and findings use scoped JSON
+- visual run state and successful result snapshots use separate relational tables
 
 Saving and loading preserves semantic equality, including immutable metadata mappings,
 empty collections, missing values, non-photo and unknown media, source references, EXIF,
 timezone-aware timestamps, and one asset placed in multiple galleries. Version-2,
-version-3, and version-4 databases migrate forward without silently dropping records.
+version-3, version-4, and version-5 databases migrate forward without silently dropping
+records. Analyzer and configuration versions coexist without automatic pruning or
+supersession.
 
 ## Existing Analytical Records
 

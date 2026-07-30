@@ -130,7 +130,8 @@ private, unlisted, and password-protected nodes are skipped. Rate limits and tra
 request failures use bounded retries with structured progress logging. The command prints
 gallery and media-reference counts and optionally saves the normalized dataset.
 
-SQLite stores normalized portfolio, gallery, unique-asset, and gallery-placement records.
+SQLite stores normalized portfolio, gallery, unique-asset, gallery-placement, and
+source-agnostic visual-analysis records.
 Saving the same crawl again updates matching source-scoped identities without creating
 duplicates. Assets encountered in more than one gallery are stored once and linked to
 each gallery through placements. The first occurrence in normalized gallery order supplies
@@ -145,10 +146,10 @@ Media assets have an explicit `photograph`, `non_photo`, or `unknown` type. Unkn
 is not treated as photography, and SmugMug video records remain represented without being
 included in photographic analysis.
 
-The database carries an explicit schema version. This release creates version 5 and
-migrates version-2, version-3, and version-4 databases in place; unsupported versions fail
-with a clear error rather than being overwritten. SQLite foreign keys and transactions
-protect relationships and roll back an incomplete save.
+The database carries an explicit schema version. This release creates version 6 and
+migrates version-2 through version-5 databases in place; unsupported versions fail with a
+clear error rather than being overwritten. SQLite foreign keys and transactions protect
+relationships and roll back an incomplete save.
 
 Inspect a saved dataset without contacting SmugMug:
 

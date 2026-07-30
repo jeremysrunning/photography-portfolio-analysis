@@ -10,6 +10,11 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- Source-agnostic visual measurement and model-classification persistence with immutable
+  analyzer/configuration identities, provenance, optional confidence, normalized geometry,
+  transactional result snapshots, and durable per-asset run state.
+- Additive SQLite schema version 6 migration with concurrency-safe visual-analysis claims,
+  explicit retry and refresh behavior, and retained older analyzer versions.
 - Source-agnostic bounded preview requests, immutable preview metadata, memory-first
   decoded-image ownership, explicit temporary-file fallback, cooperative cancellation,
   and idempotent lifecycle cleanup.
