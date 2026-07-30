@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from PIL import Image
 
+from ppa.analysis.color_luminance import ColorLuminanceAnalyzer
 from ppa.core.visual_workflow import (
     VisualAnalysisOptions,
     VisualWorkflowError,
@@ -198,6 +199,49 @@ def test_success_resume_refresh_and_preview_cleanup(tmp_path) -> None:
     )
     assert refreshed.completed == 1
     assert analyzer.calls[-1] == "photo-a"
+
+
+def test_production_color_luminance_analyzer_persists_and_resumes(tmp_path) -> None:
+    portfolio, database = _saved(tmp_path)
+    analyzer = ColorLuminanceAnalyzer()
+    sources: list[FakeSource] = []
+
+    def source_factory(*_):
+        source = FakeSource()
+        sources.append(source)
+        return source
+
+    first = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=source_factory,
+    )
+    resumed = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=source_factory,
+    )
+
+    assert first.completed == 1
+    assert resumed.already_completed == 1
+    assert all(resource.closed for source in sources for resource in source.resources)
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+    assert snapshot.state.status is VisualRunStatus.COMPLETED
+    assert len(snapshot.results) == 9
+    assert {result.name for result in snapshot.results} >= {
+        "luminance_mean",
+        "dominant_palette",
+        "palette_entropy",
+    }
 
 
 def test_filters_and_limit_follow_deterministic_asset_order(tmp_path) -> None:

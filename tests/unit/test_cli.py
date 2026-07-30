@@ -24,12 +24,12 @@ def test_init_db_command_creates_database(tmp_path) -> None:
     assert database.exists()
 
 
-def test_visual_command_reports_no_registered_production_analyzers(capsys) -> None:
-    assert main(["analyze", "visual", "missing.sqlite3"]) == 1
-    assert "No production visual analyzers are registered." in capsys.readouterr().out
-
+def test_visual_command_lists_first_registered_production_analyzer(capsys) -> None:
     assert main(["analyze", "visual", "missing.sqlite3", "--list-analyzers"]) == 0
-    assert "No production visual analyzers are registered." in capsys.readouterr().out
+    assert capsys.readouterr().out.splitlines() == [
+        "Registered visual analyzers:",
+        "  color-luminance",
+    ]
 
 
 def test_visual_analyzer_listing_and_unknown_name_are_deterministic(monkeypatch, capsys) -> None:

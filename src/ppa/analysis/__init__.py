@@ -1,6 +1,7 @@
 """Source-agnostic portfolio analysis."""
 
 from ppa.analysis.baseline import BaselineReport, Coverage, analyze_baseline
+from ppa.analysis.color_luminance import ColorLuminanceAnalyzer
 from ppa.analysis.equipment import EquipmentReport, YearlyCamera, analyze_equipment
 from ppa.analysis.focal_length import (
     FocalLengthBasis,
@@ -27,10 +28,13 @@ from ppa.analysis.visual import (
     register_visual_analyzer,
 )
 
+register_visual_analyzer(ColorLuminanceAnalyzer())
+
 __all__ = [
     "BaselineReport",
     "CameraEra",
     "CaptureGap",
+    "ColorLuminanceAnalyzer",
     "Coverage",
     "EquipmentReport",
     "FocalLengthBasis",
