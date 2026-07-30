@@ -1,0 +1,170 @@
+{
+  "actual_preview_edges": {
+    "1024": 8,
+    "256": 8,
+    "512": 8,
+    "768": 8
+  },
+  "algorithm_version": "issue-19-research-v1",
+  "artifact_kind": "aggregate_non_identifying_synthetic_visual_preview_benchmark",
+  "bytes_transferred": {
+    "count": 8,
+    "maximum": 949611,
+    "median": 25600.0,
+    "minimum": 9784
+  },
+  "cleanup": {
+    "all_preview_bytes_released_after_each_asset": true,
+    "temporary_files_created": 0,
+    "temporary_files_remaining": 0
+  },
+  "configuration": {
+    "maximum_bytes": 8000000,
+    "maximum_edge": 1280,
+    "requested_edges": [
+      256,
+      512,
+      768,
+      1024
+    ],
+    "sample_size": 8,
+    "seed": "issue-19-v1"
+  },
+  "full_portfolio_estimate_30000": {
+    "cpu_seconds_one_worker": 7215.672750317026,
+    "network_seconds_one_worker": 0.0,
+    "warning": "Bounded sample extrapolation; not a production-runtime guarantee."
+  },
+  "limitations": [
+    "Generated fixtures do not represent real portfolio compression or subject matter.",
+    "No network timing or redirect behavior is exercised.",
+    "Results validate methodology, determinism, and bounded execution only."
+  ],
+  "outcomes": {
+    "completed": 8,
+    "unavailable_or_invalid": 0
+  },
+  "packages": {
+    "Pillow": "12.3.0",
+    "numpy": "2.5.1",
+    "psutil": "7.2.2"
+  },
+  "peak_rss_bytes": 134393856,
+  "predeclared_stability_thresholds": {
+    "colorfulness": 0.05,
+    "edge_density": 0.05,
+    "global_contrast": 0.03,
+    "highlight_clipping": 0.02,
+    "luminance_mean": 0.02,
+    "luminance_median": 0.03,
+    "luminance_spread": 0.03,
+    "palette_distance": 0.08,
+    "palette_diversity": 0.08,
+    "palette_proportion_l1": 0.15,
+    "saliency_centroid_distance": 0.05,
+    "saliency_spread": 0.05,
+    "saturation_mean": 0.03,
+    "saturation_median": 0.03,
+    "shadow_clipping": 0.02,
+    "warmth_proxy": 0.03
+  },
+  "selected_sample": {
+    "fixture_families": [
+      "solid",
+      "gradient",
+      "checkerboard",
+      "two_color",
+      "geometric",
+      "low_contrast",
+      "blurred",
+      "seeded_noise"
+    ],
+    "sample_size": 8
+  },
+  "stability_by_requested_edge": {
+    "256": {
+      "comparison_count": 8,
+      "stable_rates": {
+        "colorfulness": 0.875,
+        "edge_density": 0.75,
+        "global_contrast": 0.875,
+        "highlight_clipping": 0.875,
+        "luminance_mean": 1.0,
+        "luminance_median": 1.0,
+        "luminance_spread": 0.75,
+        "palette_distance": 1.0,
+        "palette_diversity": 0.75,
+        "palette_proportion_l1": 0.625,
+        "saliency_centroid_distance": 1.0,
+        "saliency_spread": 1.0,
+        "saturation_mean": 0.875,
+        "saturation_median": 0.875,
+        "shadow_clipping": 0.875,
+        "warmth_proxy": 1.0
+      }
+    },
+    "512": {
+      "comparison_count": 8,
+      "stable_rates": {
+        "colorfulness": 0.875,
+        "edge_density": 0.75,
+        "global_contrast": 0.875,
+        "highlight_clipping": 0.875,
+        "luminance_mean": 1.0,
+        "luminance_median": 1.0,
+        "luminance_spread": 0.75,
+        "palette_distance": 1.0,
+        "palette_diversity": 0.875,
+        "palette_proportion_l1": 0.75,
+        "saliency_centroid_distance": 1.0,
+        "saliency_spread": 1.0,
+        "saturation_mean": 0.875,
+        "saturation_median": 0.875,
+        "shadow_clipping": 0.875,
+        "warmth_proxy": 1.0
+      }
+    },
+    "768": {
+      "comparison_count": 8,
+      "stable_rates": {
+        "colorfulness": 1.0,
+        "edge_density": 0.75,
+        "global_contrast": 0.875,
+        "highlight_clipping": 0.875,
+        "luminance_mean": 1.0,
+        "luminance_median": 1.0,
+        "luminance_spread": 0.875,
+        "palette_distance": 1.0,
+        "palette_diversity": 0.875,
+        "palette_proportion_l1": 0.875,
+        "saliency_centroid_distance": 1.0,
+        "saliency_spread": 1.0,
+        "saturation_mean": 0.875,
+        "saturation_median": 0.875,
+        "shadow_clipping": 0.875,
+        "warmth_proxy": 1.0
+      }
+    }
+  },
+  "timing_seconds": {
+    "analysis_seconds": {
+      "count": 8,
+      "maximum": 0.279151700087823,
+      "median": 0.22557070007314906,
+      "minimum": 0.20674170006532222
+    },
+    "decode_seconds": {
+      "count": 8,
+      "maximum": 0.01374050008598715,
+      "median": 0.007748000032734126,
+      "minimum": 0.0062853998970240355
+    },
+    "download_seconds": {
+      "count": 8,
+      "maximum": 0.0,
+      "median": 0.0,
+      "minimum": 0.0
+    }
+  },
+  "total_elapsed_seconds": 2.416564399958588
+}
