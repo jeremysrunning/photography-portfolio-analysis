@@ -1,7 +1,9 @@
 from collections.abc import Iterator
 from importlib import import_module
 
+from ppa.analysis.visual import register_visual_analyzer
 from ppa.cli import main
+from ppa.core.visual_workflow import VisualWorkflowResult
 from ppa.models import (
     Asset,
     AssetMetadata,
@@ -11,13 +13,132 @@ from ppa.models import (
     Portfolio,
     SourceReference,
 )
+from ppa.sources import PreviewRequest
 from ppa.storage import SQLitePortfolioRepository
+from ppa.visual import AnalyzerIdentity
 
 
 def test_init_db_command_creates_database(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
     assert main(["init-db", str(database)]) == 0
     assert database.exists()
+
+
+def test_visual_command_reports_no_registered_production_analyzers(capsys) -> None:
+    assert main(["analyze", "visual", "missing.sqlite3"]) == 1
+    assert "No production visual analyzers are registered." in capsys.readouterr().out
+
+    assert main(["analyze", "visual", "missing.sqlite3", "--list-analyzers"]) == 0
+    assert "No production visual analyzers are registered." in capsys.readouterr().out
+
+
+def test_visual_analyzer_listing_and_unknown_name_are_deterministic(monkeypatch, capsys) -> None:
+    class Analyzer:
+        identity = AnalyzerIdentity("zeta", "1", "defaults")
+        preview_request = PreviewRequest(512)
+
+        def analyze(self, asset, image, metadata):
+            return ()
+
+    visual_module = import_module("ppa.analysis.visual")
+    monkeypatch.setattr(visual_module, "_ANALYZERS", {})
+    register_visual_analyzer(Analyzer())
+
+    assert main(["analyze", "visual", "missing.sqlite3", "--list-analyzers"]) == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "Registered visual analyzers:",
+        "  zeta",
+    ]
+    assert (
+        main(
+            [
+                "analyze",
+                "visual",
+                "missing.sqlite3",
+                "--analyzer",
+                "unknown",
+            ]
+        )
+        == 1
+    )
+    assert capsys.readouterr().out.splitlines() == [
+        "Unknown visual analyzer: unknown",
+        "Registered visual analyzers: zeta",
+    ]
+
+
+def test_visual_command_renders_aggregate_summary_without_asset_identifiers(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    class Analyzer:
+        identity = AnalyzerIdentity("summary", "1", "defaults")
+        preview_request = PreviewRequest(512)
+
+        def analyze(self, asset, image, metadata):
+            return ()
+
+    visual_module = import_module("ppa.analysis.visual")
+    monkeypatch.setattr(visual_module, "_ANALYZERS", {})
+    register_visual_analyzer(Analyzer())
+    database = tmp_path / "portfolio.sqlite3"
+    portfolio = Portfolio(
+        "smugmug",
+        SourceReference("private-source-id", "https://example.smugmug.com"),
+        "Portfolio",
+        assets=(
+            Asset(
+                SourceReference(
+                    "private-asset-id",
+                    "https://example.smugmug.com/private-asset-id",
+                ),
+                AssetMetadata(MediaType.PHOTOGRAPH),
+            ),
+        ),
+    )
+    with SQLitePortfolioRepository(database) as repository:
+        repository.save(portfolio)
+    cli_module = import_module("ppa.cli.main")
+    monkeypatch.setattr(
+        cli_module,
+        "run_visual_analysis",
+        lambda *args, **kwargs: VisualWorkflowResult(
+            eligible_photographs=3,
+            selected_photographs=3,
+            already_completed=1,
+            existing_skipped=0,
+            existing_failed=0,
+            running_elsewhere=1,
+            completed=1,
+            skipped=0,
+            failed=0,
+            cancelled=0,
+            remaining=1,
+            elapsed_seconds=2,
+            processing_rate=0.5,
+            downloaded_bytes=100,
+        ),
+    )
+
+    assert (
+        main(
+            [
+                "analyze",
+                "visual",
+                str(database),
+                "--analyzer",
+                "summary",
+                "--api-key",
+                "secret",
+            ]
+        )
+        == 1
+    )
+    output = capsys.readouterr().out
+    assert "Running elsewhere or left running: 1" in output
+    assert "Remaining: 1" in output
+    assert "Recovery requires a separately scoped stale-run policy." in output
+    assert "private-source-id" not in output
+    assert "private-asset-id" not in output
 
 
 def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys) -> None:
