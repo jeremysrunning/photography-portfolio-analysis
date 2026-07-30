@@ -3,6 +3,7 @@
 import argparse
 import logging
 import os
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -14,6 +15,16 @@ from ppa.analysis import (
     analyze_timeline,
 )
 from ppa.core.logging import configure_logging
+from ppa.core.workflows import (
+    EnrichmentSnapshot,
+    ExifWorkflowResult,
+    InspectionResult,
+    PersistenceError,
+    enrich_portfolio_exif,
+    enrichment_snapshot,
+    inspect_public_portfolio,
+    persist_portfolio,
+)
 from ppa.models import Portfolio
 from ppa.reports import (
     render_baseline,
@@ -21,8 +32,7 @@ from ppa.reports import (
     render_focal_lengths,
     render_timeline,
 )
-from ppa.sources import SourceError, SourceRateLimitError, load_portfolio
-from ppa.sources.smugmug import SmugMugApiClient, SmugMugExifEnricher, SmugMugSource
+from ppa.sources import SourceError, SourceRateLimitError
 from ppa.storage.sqlite import SQLitePortfolioRepository
 
 logger = logging.getLogger(__name__)
@@ -54,6 +64,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--database",
         type=Path,
         help="Optionally save the normalized dataset to SQLite.",
+    )
+    import_command = commands.add_parser(
+        "import",
+        help="Inspect, persist, and enrich a public SmugMug portfolio.",
+    )
+    import_command.add_argument("url", help="Public SmugMug site URL.")
+    import_command.add_argument(
+        "--database",
+        type=Path,
+        required=True,
+        help="SQLite dataset path.",
+    )
+    import_command.add_argument(
+        "--api-key",
+        default=os.environ.get("PPA_SMUGMUG_API_KEY"),
+        help="SmugMug API key (prefer PPA_SMUGMUG_API_KEY).",
+    )
+    import_command.add_argument(
+        "--retry-failed",
+        action="store_true",
+        help="Retry assets that failed in an earlier run.",
     )
     show = commands.add_parser("show", help="Show a portfolio stored in SQLite.")
     _add_database_selection(show)
@@ -167,16 +198,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "inspect requires --api-key or the PPA_SMUGMUG_API_KEY environment variable"
             )
         try:
-            portfolio = load_portfolio(SmugMugSource(args.url, args.api_key))
+            inspection = inspect_public_portfolio(args.url, args.api_key)
         except (SourceError, ValueError) as error:
             logger.error("portfolio_inspection_failed", extra={"reason": str(error)})
             return 1
         if args.database:
-            with SQLitePortfolioRepository(args.database) as repository:
-                repository.save(portfolio)
+            try:
+                persist_portfolio(inspection.portfolio, args.database)
+            except PersistenceError as error:
+                logger.error("portfolio_persistence_failed", extra={"reason": str(error)})
+                return 1
             logger.info("portfolio_saved", extra={"path": str(args.database)})
-        _print_summary(portfolio)
+        _print_summary(inspection.portfolio)
         return 0
+    if args.command == "import":
+        if not args.api_key:
+            parser.error(
+                "import requires --api-key or the PPA_SMUGMUG_API_KEY environment variable"
+            )
+        return _import_portfolio(args)
     if args.command in {"show", "report"}:
         try:
             portfolio = _load_stored_portfolio(args.database, args.source, args.source_id)
@@ -305,58 +345,174 @@ def _print_stored_portfolio(portfolio: Portfolio) -> None:
 
 
 def _enrich_exif(portfolio: Portfolio, args: argparse.Namespace) -> int:
-    with SQLitePortfolioRepository(args.database) as repository:
-        before = repository.enrichment_status(
-            portfolio.source_name,
-            portfolio.source_id,
-            "exif",
-        )
-        targets = repository.list_enrichment_targets(
-            portfolio.source_name,
-            portfolio.source_id,
-            "exif",
-            retry_failed=args.retry_failed,
-            limit=args.limit,
-        )
-        print(
-            "EXIF enrichment status: "
-            f"{before.completed:,} completed, {before.pending:,} pending, "
-            f"{before.failed:,} failed"
-        )
-        if not targets:
-            print("No eligible assets need EXIF enrichment.")
-            return 0
+    before = enrichment_snapshot(portfolio, args.database)
+    print(
+        "EXIF enrichment status: "
+        f"{before.status.completed:,} completed, {before.status.pending:,} pending, "
+        f"{before.status.failed:,} failed"
+    )
+    progress_interval = args.batch_size * 10
 
-        client = SmugMugApiClient(portfolio.source_url, args.api_key)
-        enricher = SmugMugExifEnricher(
-            client,
-            repository,
-            batch_size=args.batch_size,
-        )
-        progress_interval = args.batch_size * 10
+    def show_progress(processed: int, total: int, failed: int) -> None:
+        if processed == total or processed % progress_interval == 0:
+            print(f"Processed {processed:,} / {total:,} ({failed:,} failed)")
 
-        def show_progress(processed: int, total: int, failed: int) -> None:
-            if processed == total or processed % progress_interval == 0:
-                print(f"Processed {processed:,} / {total:,} ({failed:,} failed)")
-
-        result = enricher.enrich(
-            portfolio.source_name,
-            portfolio.source_id,
-            targets,
-            show_progress,
-        )
-        after = repository.enrichment_status(
-            portfolio.source_name,
-            portfolio.source_id,
-            "exif",
-        )
+    result = enrich_portfolio_exif(
+        portfolio,
+        args.database,
+        args.api_key,
+        retry_failed=args.retry_failed,
+        batch_size=args.batch_size,
+        limit=args.limit,
+        progress=show_progress,
+    )
+    if result.run.selected == 0:
+        print("No eligible assets need EXIF enrichment.")
+        return 0
     print(
         "Run complete: "
-        f"{result.completed:,} completed, {result.failed:,} failed, "
-        f"{result.skipped_non_photos:,} non-photo assets skipped"
+        f"{result.run.completed:,} completed, {result.run.failed:,} failed, "
+        f"{result.run.skipped_non_photos:,} non-photo assets marked not applicable"
     )
     print(
         "Overall status: "
-        f"{after.completed:,} completed, {after.pending:,} pending, {after.failed:,} failed"
+        f"{result.after.status.completed:,} completed, "
+        f"{result.after.status.pending:,} pending, "
+        f"{result.after.status.failed:,} failed"
     )
-    return 1 if result.failed else 0
+    return 1 if result.run.failed else 0
+
+
+def _import_portfolio(args: argparse.Namespace) -> int:
+    started = time.perf_counter()
+    print("Stage 1/3: Inspecting portfolio")
+    try:
+        inspection = inspect_public_portfolio(args.url, args.api_key)
+    except (SourceError, ValueError) as error:
+        logger.error("portfolio_import_inspection_failed", extra={"reason": str(error)})
+        print(f"Inspection failed: {error}")
+        return 1
+    _print_import_counts(inspection)
+
+    print("Stage 2/3: Persisting normalized metadata")
+    try:
+        persist_portfolio(inspection.portfolio, args.database)
+    except PersistenceError as error:
+        logger.error("portfolio_import_persistence_failed", extra={"reason": str(error)})
+        print(f"Persistence failed: {error}")
+        print("EXIF enrichment was not started.")
+        return 1
+    print(f"Saved normalized metadata to {args.database}")
+
+    print("Stage 3/3: Enriching EXIF")
+    before = enrichment_snapshot(inspection.portfolio, args.database)
+    _print_enrichment_start(before)
+    progress_interval = 250
+
+    def show_progress(processed: int, total: int, failed: int) -> None:
+        if processed == total or processed % progress_interval == 0:
+            print(f"Processed {processed:,} / {total:,} ({failed:,} failed)")
+
+    try:
+        result = enrich_portfolio_exif(
+            inspection.portfolio,
+            args.database,
+            args.api_key,
+            retry_failed=args.retry_failed,
+            progress=show_progress,
+        )
+    except SourceRateLimitError as error:
+        after = enrichment_snapshot(inspection.portfolio, args.database)
+        logger.warning("portfolio_import_rate_limited", extra={"reason": str(error)})
+        print(str(error))
+        _print_import_summary(inspection, before, after, args.database, started)
+        _print_resume_guidance()
+        return 2
+    except (OSError, SourceError, ValueError) as error:
+        after = enrichment_snapshot(inspection.portfolio, args.database)
+        logger.error("portfolio_import_enrichment_failed", extra={"reason": str(error)})
+        print(f"EXIF enrichment stopped: {error}")
+        _print_import_summary(inspection, before, after, args.database, started)
+        _print_resume_guidance()
+        return 1
+
+    _print_import_summary(
+        inspection,
+        result.before,
+        result.after,
+        args.database,
+        started,
+        result,
+    )
+    if result.after.status.failed or result.after.status.pending:
+        _print_resume_guidance()
+        return 1
+    return 0
+
+
+def _print_import_counts(inspection: InspectionResult) -> None:
+    counts = inspection.counts
+    print(
+        f"Found {counts.galleries:,} galleries, {counts.media_references:,} media "
+        f"references, and {counts.unique_media:,} unique assets "
+        f"({counts.photographs:,} photographs, {counts.non_photos:,} non-photo, "
+        f"{counts.unknown:,} unknown)."
+    )
+
+
+def _print_enrichment_start(before: EnrichmentSnapshot) -> None:
+    print(
+        f"Before this run: {before.photographs_complete:,} photographs enriched, "
+        f"{before.non_photos_complete:,} non-photo assets marked not applicable, "
+        f"{before.status.pending:,} pending, {before.status.failed:,} failed."
+    )
+
+
+def _print_import_summary(
+    inspection: InspectionResult,
+    before: EnrichmentSnapshot,
+    after: EnrichmentSnapshot,
+    database: Path,
+    started: float,
+    result: ExifWorkflowResult | None = None,
+) -> None:
+    newly_enriched = after.photographs_complete - before.photographs_complete
+    newly_non_photos = after.non_photos_complete - before.non_photos_complete
+    print("Import summary")
+    print(f"  Database: {database}")
+    print(f"  Galleries inspected: {inspection.counts.galleries:,}")
+    print(f"  Unique assets persisted: {inspection.counts.unique_media:,}")
+    print(f"  Photographs newly enriched during this run: {newly_enriched:,}")
+    print(f"  Photographs already enriched before this run: {before.photographs_complete:,}")
+    print(
+        "  Non-photo assets marked complete because EXIF is not applicable: "
+        f"{after.non_photos_complete:,} ({newly_non_photos:,} during this run)"
+    )
+    if inspection.counts.unknown:
+        newly_unknown = after.unknown_complete - before.unknown_complete
+        print(
+            f"  Unknown-media assets completed: {after.unknown_complete:,} "
+            f"({newly_unknown:,} during this run)"
+        )
+    print(f"  Failed assets: {after.status.failed:,}")
+    print(f"  Pending or remaining assets: {after.status.pending:,}")
+    if result is not None and result.run.failed:
+        print(f"  Item failures during this run: {result.run.failed:,}")
+    print(f"  Elapsed: {_format_elapsed(time.perf_counter() - started)}")
+
+
+def _print_resume_guidance() -> None:
+    print("The database remains usable and successful enrichment was preserved.")
+    print("The import can be resumed safely by running the same command again.")
+    print("Use --retry-failed when failed records need another attempt.")
+
+
+def _format_elapsed(seconds: float) -> str:
+    total = max(0, round(seconds))
+    minutes, seconds = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {seconds}s"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
