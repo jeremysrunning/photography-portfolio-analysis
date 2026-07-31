@@ -224,10 +224,11 @@ register them. Future work may unblock Issue #38 only after a separately approve
 passes documentary preflight and blind technical validation; existing research artifacts
 must not be promoted by changing their import path.
 
-Issue #39 may optionally consume subject detections when they exist but retains an
-independent saliency path. Issue #42's people-presence and subject-placement sections depend
-on Issue #38 and must remain absent until persisted production results exist. Issues #40
-and #41 have no Issue #38 dependency.
+Issue #39 is fully independent of Issue #38 and measures only deterministic saliency
+geometry; it does not consume subject detections. People-aware composition enhancements
+require a separate future issue after Issue #38 is unblocked. Issue #42's people-presence
+and subject-placement sections depend on Issue #38 and must remain absent until persisted
+production results exist. Issues #40 and #41 have no Issue #38 dependency.
 
 Saves transactionally upsert records by source-scoped identity. The first normalized
 occurrence of a repeated asset supplies its canonical fields, matching analyzer

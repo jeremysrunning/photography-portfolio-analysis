@@ -34,8 +34,9 @@ production gates. Research code must remain isolated until that approval exists.
 
 ## Downstream dependencies
 
-- Issue #39 can proceed independently through saliency and structural measurements;
-  subject-based measurements remain optional and unavailable while Issue #38 is blocked.
+- Issue #39 is fully independent and uses deterministic saliency measurements only. It
+  consumes no people, face, object, or semantic-subject detections. Any future people-aware
+  enhancement requires a separate issue after Issue #38 is unblocked.
 - Issues #40 and #41 do not assume Issue #38 completion.
 - Issue #42 can report available visual-analysis families, but its people-presence and
   subject-placement sections require persisted production results from Issue #38 and must
