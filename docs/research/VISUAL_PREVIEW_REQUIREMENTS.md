@@ -23,7 +23,7 @@ Synthetic results support these provisional choices:
 | Spectral-residual saliency | 512 px | Usable with caveats |
 | Edge density and global contrast | 768 px | Usable with caveats |
 | Sharpness, blur, noise, depth of field | Not selected | Deferred as resolution-sensitive |
-| People and faces | Not selected | Not yet evaluated; candidate selection deferred |
+| People and faces | Not selected | Blocked after Issues #49 and #51; no production detector approved |
 | Broad scene classification/segmentation | Not selected | Not yet evaluated |
 
 These are not final empirical portfolio recommendations. The real preview benchmark could
@@ -310,9 +310,11 @@ Normal exceptions release in-memory objects. A forcefully terminated process rel
 operating system to reclaim memory. Because this spike uses no temporary files, crash
 cleanup is not otherwise required.
 
-## People-detection decision and future protocol
+## Historical Issue #19 people-detection decision and future protocol
 
-People detection is **not yet evaluated**. It is not classified as unsuitable.
+At the close of Issue #19, people detection was **not yet evaluated**. That historical
+status was superseded by Issue #49 calibration and Issue #51 replacement-strategy research.
+Issue #38 is now blocked with no approved production person or face detector.
 
 No candidate was adopted because this spike did not establish one that simultaneously had
 verified package and weight licenses, weight provenance, bounded installed size,
@@ -441,11 +443,17 @@ set the end-to-end rate.
 
 ### Issue #38 — people and subject placement
 
-- preview: compare 512/768/1024; no selection yet
-- model: none selected
-- readiness: not yet evaluated
-- failures to test: small/distant, occluded, edge-cropped, groups, faces without full-body
-  detections, low confidence
+- status: blocked; no production detector, preview size, threshold, or configuration is
+  approved
+- Issue #49 result: evaluated NanoDet and YuNet configurations did not satisfy the
+  predeclared manual-accuracy and cross-resolution production gates
+- Issue #51 result: documentary replacement research found no candidate satisfying the
+  required licensing, provenance, reproducibility, packaging, privacy, and technical
+  contract; no candidate advanced to implementation
+- research boundary: the NanoDet/YuNet code and artifacts remain calibration-only under
+  `research/` and must not be treated as expected production detectors
+- unblock condition: a separately approved candidate must pass documentary preflight,
+  bounded calibration, and a frozen blind holdout without lowering the existing gates
 
 ### Issue #39 — composition and saliency
 

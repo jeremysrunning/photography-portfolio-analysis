@@ -1,4 +1,8 @@
-# Bundled people-placement model artifacts
+# Research-only people-placement model artifacts
+
+These artifacts reproduce Issue #49 calibration. That research rejected both evaluated
+detector strategies for production. They are not expected production dependencies or an
+approved Issue #38 configuration.
 
 These artifacts are package resources. They are loaded locally, require no network access,
 and are verified by SHA-256 before OpenCV initializes a network.

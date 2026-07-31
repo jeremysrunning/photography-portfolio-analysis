@@ -80,6 +80,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Changed
 
+- Reconciled visual-analysis planning with the completed Issues #49 and #51 research:
+  Issue #38 is explicitly blocked with no approved production people/face detector, and
+  downstream report dependencies and the calibration-only research boundary are documented.
 - Separated SmugMug authentication and authorization failures and removed
   provider-supplied text from normalized API errors.
 - Aligned shared ingestion, SQLite loading, and analyzers on portfolio-owned unique assets

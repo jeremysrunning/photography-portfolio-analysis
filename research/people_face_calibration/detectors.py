@@ -1,4 +1,4 @@
-"""Lazy CPU-only inference adapters for people-placement analysis."""
+"""Lazy CPU-only detector adapters retained for calibration research only."""
 
 from __future__ import annotations
 

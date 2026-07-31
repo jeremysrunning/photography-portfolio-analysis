@@ -1,4 +1,4 @@
-"""Neutral person and face placement measurements from bounded previews."""
+"""Calibration-only person and face measurements from bounded research previews."""
 
 from __future__ import annotations
 

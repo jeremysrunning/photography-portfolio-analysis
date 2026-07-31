@@ -209,6 +209,26 @@ the no-ICC provider-rendered-sRGB assumption are configuration semantics. Compat
 multi-analyzer preview sharing remains deferred until at least two real analyzers establish
 their preview, memory, failure, and partial-completion requirements.
 
+### Blocked people and face analysis
+
+Issue #38 is not implementation-ready. Issue #49 found that the evaluated NanoDet and
+YuNet configurations did not satisfy the approved production gates. Issue #51 then
+performed documentary replacement-detector research without finding a candidate that
+satisfied the project's licensing, provenance, reproducibility, packaging, privacy, and
+technical requirements. No production people or face detector, preview edge, threshold,
+or analyzer identity is approved.
+
+The NanoDet/YuNet adapters, model artifacts, calibration analysis, and related tests remain
+under the `research.people_face_calibration` boundary. Production modules do not import or
+register them. Future work may unblock Issue #38 only after a separately approved candidate
+passes documentary preflight and blind technical validation; existing research artifacts
+must not be promoted by changing their import path.
+
+Issue #39 may optionally consume subject detections when they exist but retains an
+independent saliency path. Issue #42's people-presence and subject-placement sections depend
+on Issue #38 and must remain absent until persisted production results exist. Issues #40
+and #41 have no Issue #38 dependency.
+
 Saves transactionally upsert records by source-scoped identity. The first normalized
 occurrence of a repeated asset supplies its canonical fields, matching analyzer
 deduplication. Records missing from later crawls are retained unless a future explicit
