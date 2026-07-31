@@ -1,0 +1,78 @@
+{
+  "artifact_kind": "aggregate_non_identifying_detector_calibration_summary",
+  "issue": 49,
+  "sample": {
+    "requested": 48,
+    "complete_triplets": 47,
+    "excluded_provider_dimension_mismatches": 1,
+    "annotation_confidence": {"high": 28, "medium": 11, "low": 8},
+    "five_year_bands": 5,
+    "camera_groups": 6,
+    "gallery_groups": 45
+  },
+  "baseline_retained_manual_review": {
+    "people": {
+      "visible": 237,
+      "obvious_false_positives": 305,
+      "obvious_false_negatives": 20,
+      "bounded_precision_like": 0.4157,
+      "bounded_recall_like": 0.9156
+    },
+    "faces": {
+      "visible": 153,
+      "obvious_false_positives": 24,
+      "obvious_false_negatives": 20,
+      "bounded_precision_like": 0.8471,
+      "bounded_recall_like": 0.8693
+    }
+  },
+  "diagnostic_candidates": {
+    "people_768_retention_020_acceptance_035_nms_050": {
+      "accepted_count_agreement_with_1024": 0.7660,
+      "median_matched_iou": 0.9689,
+      "high_and_medium_count_derived_precision_like": 0.9266,
+      "high_and_medium_count_derived_recall_like": 0.6824,
+      "production_gate_passed": false
+    },
+    "people_768_retention_020_acceptance_045_nms_050": {
+      "accepted_count_agreement_with_1024": 0.8298,
+      "median_matched_iou": 0.9751,
+      "high_and_medium_count_derived_precision_like": 0.9651,
+      "high_and_medium_count_derived_recall_like": 0.5608,
+      "production_gate_passed": false
+    },
+    "faces_768_retention_040_acceptance_060_nms_030": {
+      "accepted_count_agreement_with_1024": 0.8511,
+      "median_matched_iou": 0.8744,
+      "high_and_medium_count_derived_precision_like": 0.9104,
+      "high_and_medium_count_derived_recall_like": 0.6224,
+      "production_gate_passed": false
+    },
+    "faces_1024_retention_040_acceptance_050_nms_030": {
+      "high_and_medium_count_derived_precision_like": 0.8387,
+      "high_and_medium_count_derived_recall_like": 0.7959,
+      "high_only_count_derived_precision_like": 0.6905,
+      "high_only_count_derived_recall_like": 0.9667,
+      "production_gate_passed": false
+    }
+  },
+  "runtime": {
+    "mean_preview_acquisition_seconds": 1.1507,
+    "mean_normalization_seconds": 0.0010,
+    "mean_person_inference_seconds": 0.0620,
+    "mean_face_inference_seconds": 0.0207,
+    "downloaded_preview_bytes": 19707286,
+    "approximate_process_rss_mib": 100.5
+  },
+  "decision": {
+    "outcome": "defer_both",
+    "people_production_ready": false,
+    "faces_production_ready": false,
+    "approved_people_configuration": null,
+    "approved_face_configuration": null,
+    "issue_38_may_resume": false
+  },
+  "contains_per_image_rows": false,
+  "contains_identifiers": false,
+  "contains_image_content": false
+}
