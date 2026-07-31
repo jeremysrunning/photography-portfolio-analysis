@@ -10,6 +10,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- A predeclared, privacy-bounded research method and aggregate-only tooling for Issue #49
+  person/face detector threshold, NMS, and preview-size calibration; no production analyzer
+  is registered while calibration remains unresolved.
 - The first production visual analyzer, `color-luminance`, with deterministic bounded
   relative-luminance, saturation, colorfulness, luminance-tail, dominant-palette, and
   palette-entropy measurements plus explicit rendered-preview limitations.
