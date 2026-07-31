@@ -1,4 +1,4 @@
-"""Production people-placement analyzer tests."""
+"""Calibration-only people-placement research tests."""
 
 from __future__ import annotations
 

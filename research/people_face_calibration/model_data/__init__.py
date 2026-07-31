@@ -1,1 +1,1 @@
-"""Licensed, checksummed people-placement detector artifacts."""
+"""Checksummed calibration artifacts rejected for production by Issue #49."""

@@ -25,11 +25,25 @@ Completed:
 - resumable, batched public EXIF enrichment
 - source-agnostic equipment and exposure report
 - source-agnostic timeline habits report
+- bounded production preview lifecycle
+- resumable visual-analysis persistence and orchestration
+- deterministic color and luminance visual analysis
+- bounded NanoDet/YuNet calibration research and replacement-detector documentary research
 
 Next:
 
-- define temporary preview-fetching behavior before visual analysis is added
 - add further focused temporal analyzers
+- validate independently scoped visual analyzers that do not require people detection
+
+Blocked:
+
+- Issue #38 people and subject-placement analysis has no approved production detector.
+  Issue #49 rejected the evaluated NanoDet/YuNet configurations against the declared
+  production gates, and Issue #51 found no replacement candidate that cleared documentary
+  licensing and project requirements. Resume only after a newly approved candidate passes
+  licensing, provenance, reproducibility, packaging, privacy, and blind technical gates.
+- Issue #42 may report existing visual families independently, but its people-presence and
+  subject-placement sections depend on completed Issue #38 measurements.
 
 ### Goals
 
@@ -76,6 +90,9 @@ Potential areas include:
 - Scene classification
 - Composition analysis
 - Motion estimation
+
+People counting and face detection remain research questions, not planned production
+capabilities, until Issue #38's blocker is resolved.
 
 ---
 

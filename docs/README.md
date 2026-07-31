@@ -63,7 +63,12 @@ This project is in its early foundation phase. It currently provides:
 - structured JSON logging
 - a small command-line interface
 
-Portfolio analysis and report generation are not implemented yet.
+Metadata analyzers, reports, visual-analysis persistence and orchestration, and the
+`color-luminance` visual analyzer are implemented. People and face detection is not a
+production capability: Issue #38 remains blocked after Issues #49 and #51 found no
+detector strategy that satisfies the approved evidence and distribution requirements.
+The NanoDet and YuNet implementations under `research/` are calibration evidence only;
+they are not registered production analyzers.
 
 ## Development
 
