@@ -17,10 +17,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "hatchling>=1.27",
     "pytest>=8.0",
     "ruff>=0.9",
 ]
 research = [
+    "opencv-python-headless==4.13.0.92",
     "psutil==7.2.2",
 ]
 
