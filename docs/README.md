@@ -183,6 +183,11 @@ palette, and palette-entropy measurements. Use
 The command processes one analyzer/configuration identity at a time, defaults to one
 worker, and accepts an explicit range of one through four. `--limit`, exact `--gallery`
 source ID, and recorded `--year` filters are applied after deterministic asset sorting.
+Progress uses the work items selected by the command's run-state mode as its denominator.
+The final summary separately reports eligible photographs, asset-filter matches, selected
+and processed work, state-excluded identities, and remaining work within that invocation.
+In particular, ordinary pending identities excluded by `--only-failed` are not reported
+as remaining failed-only work.
 
 Completed work is skipped unless `--refresh` is supplied. `--retry-failed` includes durable
 failures and cancellation-interrupted pending work; `--only-failed` includes only durable

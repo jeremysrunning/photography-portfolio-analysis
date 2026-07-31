@@ -93,6 +93,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Fixed
 
+- Scoped visual-analysis progress and remaining-work summaries to the work identities
+  selected by the command's run-state mode, while separately disclosing asset-filter
+  matches and intentionally excluded states.
 - Kept temporary-file and memory-backed previews in the same EXIF-orientation-applied
   pixel coordinate system, with explicit downloaded-versus-file encoding metadata.
 

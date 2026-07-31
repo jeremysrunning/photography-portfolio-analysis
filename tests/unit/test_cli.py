@@ -103,16 +103,19 @@ def test_visual_command_renders_aggregate_summary_without_asset_identifiers(
         "run_visual_analysis",
         lambda *args, **kwargs: VisualWorkflowResult(
             eligible_photographs=3,
-            selected_photographs=3,
-            already_completed=1,
-            existing_skipped=0,
-            existing_failed=0,
-            running_elsewhere=1,
+            filter_matched_photographs=3,
+            selected_work_items=3,
+            processed_work_items=2,
+            already_completed_excluded=1,
+            skipped_excluded=0,
+            failed_excluded=0,
+            pending_excluded=0,
+            running_excluded=1,
             completed=1,
             skipped=0,
             failed=1,
             cancelled=0,
-            remaining=1,
+            remaining_selected_work=1,
             elapsed_seconds=2,
             processing_rate=0.5,
             downloaded_bytes=100,
@@ -134,12 +137,82 @@ def test_visual_command_renders_aggregate_summary_without_asset_identifiers(
         == 1
     )
     output = capsys.readouterr().out
+    assert "Photographs matching asset filters: 3" in output
+    assert "Work items selected by state: 3" in output
+    assert "Work items processed: 2" in output
     assert "Running elsewhere or left running: 1" in output
     assert "Failed during this run: 1" in output
-    assert "Remaining: 1" in output
+    assert "Remaining selected work: 1" in output
     assert "Recovery requires a separately scoped stale-run policy." in output
     assert "private-source-id" not in output
     assert "private-asset-id" not in output
+
+
+def test_visual_only_failed_success_uses_selected_work_denominator(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    class Analyzer:
+        identity = AnalyzerIdentity("failed-only-summary", "1", "defaults")
+        preview_request = PreviewRequest(512)
+
+        def analyze(self, asset, image, metadata):
+            return ()
+
+    visual_module = import_module("ppa.analysis.visual")
+    monkeypatch.setattr(visual_module, "_ANALYZERS", {})
+    register_visual_analyzer(Analyzer())
+    database = tmp_path / "portfolio.sqlite3"
+    portfolio = Portfolio(
+        "smugmug",
+        SourceReference("portfolio", "https://example.smugmug.com"),
+        "Portfolio",
+    )
+    cli_module = import_module("ppa.cli.main")
+    monkeypatch.setattr(cli_module, "_load_stored_portfolio", lambda *args: portfolio)
+    monkeypatch.setattr(
+        cli_module,
+        "run_visual_analysis",
+        lambda *args, **kwargs: VisualWorkflowResult(
+            eligible_photographs=30_258,
+            filter_matched_photographs=30_258,
+            selected_work_items=1,
+            processed_work_items=1,
+            already_completed_excluded=11,
+            skipped_excluded=0,
+            failed_excluded=0,
+            pending_excluded=30_246,
+            running_excluded=0,
+            completed=1,
+            skipped=0,
+            failed=0,
+            cancelled=0,
+            remaining_selected_work=0,
+            elapsed_seconds=2,
+            processing_rate=0.5,
+            downloaded_bytes=100,
+        ),
+    )
+
+    assert (
+        main(
+            [
+                "analyze",
+                "visual",
+                str(database),
+                "--analyzer",
+                "failed-only-summary",
+                "--api-key",
+                "secret",
+                "--only-failed",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "Work items selected by state: 1" in output
+    assert "Work items processed: 1" in output
+    assert "Pending but excluded by state selection: 30,246" in output
+    assert "Remaining selected work: 0" in output
 
 
 def test_inspect_prints_summary_and_saves_dataset(monkeypatch, tmp_path, capsys) -> None:

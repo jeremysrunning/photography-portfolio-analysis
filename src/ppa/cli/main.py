@@ -631,28 +631,31 @@ def _analyze_visual(args: argparse.Namespace, parser: argparse.ArgumentParser) -
     print(f"  Analyzer version: {analyzer.identity.version}")
     print(f"  Configuration version: {analyzer.identity.configuration_version}")
     print(f"  Eligible photographs: {result.eligible_photographs:,}")
-    print(f"  Selected photographs: {result.selected_photographs:,}")
+    print(f"  Photographs matching asset filters: {result.filter_matched_photographs:,}")
+    print(f"  Work items selected by state: {result.selected_work_items:,}")
+    print(f"  Work items processed: {result.processed_work_items:,}")
     print(f"  Completed during this run: {result.completed:,}")
-    print(f"  Already completed: {result.already_completed:,}")
+    print(f"  Already completed but excluded: {result.already_completed_excluded:,}")
     print(f"  Skipped during this run: {result.skipped:,}")
-    print(f"  Previously skipped: {result.existing_skipped:,}")
+    print(f"  Previously skipped and excluded: {result.skipped_excluded:,}")
     print(f"  Failed during this run: {result.failed:,}")
-    print(f"  Existing failed: {result.existing_failed:,}")
-    print(f"  Running elsewhere or left running: {result.running_elsewhere:,}")
+    print(f"  Existing failed but excluded: {result.failed_excluded:,}")
+    print(f"  Pending but excluded by state selection: {result.pending_excluded:,}")
+    print(f"  Running elsewhere or left running: {result.running_excluded:,}")
     print(f"  Cancellation-interrupted: {result.cancelled:,}")
-    print(f"  Remaining: {result.remaining:,}")
+    print(f"  Remaining selected work: {result.remaining_selected_work:,}")
     print(f"  Downloaded preview bytes: {result.downloaded_bytes:,}")
     print(f"  Elapsed: {_format_elapsed(result.elapsed_seconds)}")
     if result.processing_rate is None:
         print("  Processing rate: not yet meaningful")
     else:
         print(f"  Processing rate: {result.processing_rate:.2f} photographs/second")
-    if result.running_elsewhere:
+    if result.running_excluded:
         print(
             "Running work was not reclaimed. Recovery requires a separately scoped "
             "stale-run policy."
         )
-    if result.cancelled or result.failed or result.remaining:
+    if result.cancelled or result.failed or result.remaining_selected_work:
         print("Completed results were preserved and the database can be resumed safely.")
     if result.rate_limited:
         return 2
@@ -660,7 +663,7 @@ def _analyze_visual(args: argparse.Namespace, parser: argparse.ArgumentParser) -
         return 1
     if result.cancelled_by_user:
         return 130
-    return 1 if result.failed or result.remaining else 0
+    return 1 if result.failed or result.remaining_selected_work else 0
 
 
 def _format_elapsed(seconds: float) -> str:

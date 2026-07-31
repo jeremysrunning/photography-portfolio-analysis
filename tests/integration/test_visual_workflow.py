@@ -187,7 +187,7 @@ def test_success_resume_refresh_and_preview_cleanup(tmp_path) -> None:
         source_factory=source_factory,
     )
     assert resumed.completed == 0
-    assert resumed.already_completed == 3
+    assert resumed.already_completed_excluded == 3
 
     refreshed = run_visual_analysis(
         portfolio,
@@ -229,7 +229,7 @@ def test_production_color_luminance_analyzer_persists_and_resumes(tmp_path) -> N
     )
 
     assert first.completed == 1
-    assert resumed.already_completed == 1
+    assert resumed.already_completed_excluded == 1
     assert all(resource.closed for source in sources for resource in source.resources)
     with SQLitePortfolioRepository(database) as repository:
         snapshot = repository.visual_analysis_snapshot(
@@ -262,7 +262,8 @@ def test_filters_and_limit_follow_deterministic_asset_order(tmp_path) -> None:
     )
 
     assert result.eligible_photographs == 3
-    assert result.selected_photographs == 1
+    assert result.filter_matched_photographs == 1
+    assert result.selected_work_items == 1
     assert analyzer.calls == ["photo-a"]
 
 
@@ -280,11 +281,35 @@ def test_failed_retry_and_only_failed_are_independent(tmp_path) -> None:
         database,
         "secret",
         analyzer,
-        options=VisualAnalysisOptions(preview_attempts=1),
+        options=VisualAnalysisOptions(limit=2, preview_attempts=1),
         source_factory=lambda *_: FakeSource(behavior),
     )
     assert first.failed == 1
+    assert first.selected_work_items == 2
+    assert first.processed_work_items == 2
+    assert first.remaining_selected_work == 0
     failures.clear()
+
+    progress = []
+    retry = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(only_failed=True),
+        progress=progress.append,
+        source_factory=lambda *_: FakeSource(),
+    )
+    assert retry.filter_matched_photographs == 3
+    assert retry.selected_work_items == 1
+    assert retry.processed_work_items == 1
+    assert retry.completed == 1
+    assert retry.remaining_selected_work == 0
+    assert retry.already_completed_excluded == 1
+    assert retry.pending_excluded == 1
+    assert progress[-1].selected == retry.selected_work_items
+    assert progress[-1].processed == retry.processed_work_items
+    assert progress[-1].remaining == retry.remaining_selected_work
 
     normal = run_visual_analysis(
         portfolio,
@@ -293,16 +318,59 @@ def test_failed_retry_and_only_failed_are_independent(tmp_path) -> None:
         analyzer,
         source_factory=lambda *_: FakeSource(),
     )
-    assert normal.existing_failed == 1
-    retry = run_visual_analysis(
+    assert normal.selected_work_items == 1
+    assert normal.completed == 1
+    assert normal.remaining_selected_work == 0
+    assert normal.already_completed_excluded == 2
+
+
+def test_retry_failed_and_refresh_have_mode_specific_work_denominators(tmp_path) -> None:
+    portfolio, database = _saved(tmp_path)
+    failures = {"photo-a"}
+    analyzer = FakeAnalyzer(identity=AnalyzerIdentity("mode-matrix", "1", "defaults"))
+
+    def behavior(asset):
+        if asset.source_id in failures:
+            raise SourceTransientError("temporary")
+
+    initial = run_visual_analysis(
         portfolio,
         database,
         "secret",
         analyzer,
-        options=VisualAnalysisOptions(only_failed=True),
+        options=VisualAnalysisOptions(limit=2, preview_attempts=1),
+        source_factory=lambda *_: FakeSource(behavior),
+    )
+    assert initial.selected_work_items == 2
+    failures.clear()
+
+    retried = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(retry_failed=True),
         source_factory=lambda *_: FakeSource(),
     )
-    assert retry.completed == 1
+    assert retried.filter_matched_photographs == 3
+    assert retried.selected_work_items == 2
+    assert retried.processed_work_items == 2
+    assert retried.completed == 2
+    assert retried.remaining_selected_work == 0
+    assert retried.already_completed_excluded == 1
+
+    refreshed = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(refresh=True),
+        source_factory=lambda *_: FakeSource(),
+    )
+    assert refreshed.selected_work_items == 3
+    assert refreshed.processed_work_items == 3
+    assert refreshed.completed == 3
+    assert refreshed.remaining_selected_work == 0
 
 
 def test_unavailable_preview_is_skipped_neutrally(tmp_path) -> None:
@@ -498,7 +566,7 @@ def test_explicitly_allowed_empty_output_completes_and_resumes_as_complete(
         source_factory=lambda *_: FakeSource(),
     )
     assert resumed.completed == 0
-    assert resumed.already_completed == 1
+    assert resumed.already_completed_excluded == 1
 
 
 def test_transient_preview_retries_are_bounded_and_progress_includes_eta(tmp_path) -> None:
@@ -551,7 +619,7 @@ def test_exhausted_rate_limit_stops_scheduling_and_preserves_progress(tmp_path) 
 
     assert result.rate_limited
     assert result.failed == 1
-    assert result.remaining == 3
+    assert result.remaining_selected_work == 2
     assert attempts == 2
 
 
@@ -642,7 +710,7 @@ def test_keyboard_interrupt_preserves_completed_assets_and_stops_new_claims(tmp_
 
     assert result.cancelled_by_user
     assert result.completed == 1
-    assert result.remaining == 2
+    assert result.remaining_selected_work == 2
     with SQLitePortfolioRepository(database) as repository:
         first = repository.visual_analysis_snapshot(
             "smugmug",
@@ -680,7 +748,7 @@ def test_running_is_never_reclaimed_by_any_retry_mode(tmp_path) -> None:
             options=options,
             source_factory=lambda *_: FakeSource(),
         )
-        assert result.running_elsewhere == 1
+        assert result.running_excluded == 1
         assert analyzer.calls == []
         with SQLitePortfolioRepository(database) as repository:
             snapshot = repository.visual_analysis_snapshot(
@@ -778,6 +846,6 @@ def test_two_commands_cannot_process_same_exact_identity(tmp_path) -> None:
     release.set()
     first.join(timeout=5)
 
-    assert second.running_elsewhere == 1
+    assert second.running_excluded == 1
     assert sum(result.completed for result in results) == 1
     assert analyzer.calls == ["photo-a"]
