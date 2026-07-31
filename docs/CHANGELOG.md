@@ -10,6 +10,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- The first production visual analyzer, `color-luminance`, with deterministic bounded
+  relative-luminance, saturation, colorfulness, luminance-tail, dominant-palette, and
+  palette-entropy measurements plus explicit rendered-preview limitations.
 - Resumable `ppa analyze visual` orchestration with deterministic photograph targeting,
   exact analyzer/configuration claims, bounded preview retries, incremental persistence,
   graceful cancellation, bounded one-to-four-worker execution, and aggregate progress.
@@ -90,6 +93,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Fixed
 
+- Scoped visual-analysis progress and remaining-work summaries to the work identities
+  selected by the command's run-state mode, while separately disclosing asset-filter
+  matches and intentionally excluded states.
 - Kept temporary-file and memory-backed previews in the same EXIF-orientation-applied
   pixel coordinate system, with explicit downloaded-versus-file encoding metadata.
 

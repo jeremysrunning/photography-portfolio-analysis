@@ -201,7 +201,11 @@ current claim to cancellation-interrupted pending. Rate limiting and transient p
 access use bounded retries. Results complete only after the preview resource has closed,
 and each exact result set commits atomically.
 
-The production analyzer registry is intentionally empty until Issue #37. Compatible
+The production registry includes the `color-luminance` analyzer under immutable identity
+`color-luminance` / `1.0.0` / `rendered-srgb-768-v1`. It consumes every pixel of one
+bounded, memory-backed 768 px preview and emits a complete deterministic result set.
+Normalization, thresholds, quantization, rounding, alpha background, preview edge, and
+the no-ICC provider-rendered-sRGB assumption are configuration semantics. Compatible
 multi-analyzer preview sharing remains deferred until at least two real analyzers establish
 their preview, memory, failure, and partial-completion requirements.
 

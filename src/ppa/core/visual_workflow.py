@@ -111,16 +111,19 @@ class VisualWorkflowResult:
     """Final state for one visual-analysis command."""
 
     eligible_photographs: int
-    selected_photographs: int
-    already_completed: int
-    existing_skipped: int
-    existing_failed: int
-    running_elsewhere: int
+    filter_matched_photographs: int
+    selected_work_items: int
+    processed_work_items: int
+    already_completed_excluded: int
+    skipped_excluded: int
+    failed_excluded: int
+    pending_excluded: int
+    running_excluded: int
     completed: int
     skipped: int
     failed: int
     cancelled: int
-    remaining: int
+    remaining_selected_work: int
     elapsed_seconds: float
     processing_rate: float | None
     downloaded_bytes: int
@@ -189,7 +192,7 @@ def run_visual_analysis(
     selected = _filter_assets(portfolio, photographs, options)
 
     pending: list[_Target] = []
-    already_completed = existing_skipped = existing_failed = running = 0
+    already_completed = existing_skipped = existing_failed = excluded_pending = running = 0
     with repository_factory(database) as repository:
         for asset in selected:
             snapshot = repository.visual_analysis_snapshot(
@@ -215,6 +218,8 @@ def run_visual_analysis(
                     already_completed += 1
                 elif status is VisualRunStatus.SKIPPED:
                     existing_skipped += 1
+                else:
+                    excluded_pending += 1
             elif status is VisualRunStatus.COMPLETED and not options.refresh:
                 already_completed += 1
             elif status is VisualRunStatus.SKIPPED and not options.refresh:
@@ -222,7 +227,7 @@ def run_visual_analysis(
             elif status is VisualRunStatus.FAILED and not options.retry_failed:
                 existing_failed += 1
             elif status is VisualRunStatus.PENDING and interrupted and not options.retry_failed:
-                pass
+                excluded_pending += 1
             else:
                 pending.append(target)
 
@@ -311,28 +316,36 @@ def run_visual_analysis(
         executor.shutdown(wait=True, cancel_futures=False)
 
     elapsed = max(0.0, clock() - started)
-    remaining = (
-        len(selected)
-        - already_completed
-        - counters["already_completed"]
-        - existing_skipped
-        - counters["existing_skipped"]
-        - counters["completed"]
-        - counters["skipped"]
+    processed = sum(
+        counters[name]
+        for name in (
+            "completed",
+            "skipped",
+            "failed",
+            "cancelled",
+            "running",
+            "already_completed",
+            "existing_failed",
+            "existing_skipped",
+        )
     )
+    remaining = len(pending) - processed
     rate = counters["completed"] / elapsed if elapsed > 0 and counters["completed"] else None
     return VisualWorkflowResult(
         eligible_photographs=len(photographs),
-        selected_photographs=len(selected),
-        already_completed=already_completed + counters["already_completed"],
-        existing_skipped=existing_skipped + counters["existing_skipped"],
-        existing_failed=existing_failed + counters["existing_failed"],
-        running_elsewhere=running + counters["running"],
+        filter_matched_photographs=len(selected),
+        selected_work_items=len(pending),
+        processed_work_items=processed,
+        already_completed_excluded=already_completed,
+        skipped_excluded=existing_skipped,
+        failed_excluded=existing_failed,
+        pending_excluded=excluded_pending,
+        running_excluded=running,
         completed=counters["completed"],
         skipped=counters["skipped"],
         failed=counters["failed"],
         cancelled=counters["cancelled"],
-        remaining=max(0, remaining),
+        remaining_selected_work=max(0, remaining),
         elapsed_seconds=elapsed,
         processing_rate=rate,
         downloaded_bytes=counters["downloaded_bytes"],

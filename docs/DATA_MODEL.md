@@ -147,6 +147,29 @@ therefore distinguish an older successful snapshot from the current incomplete a
 Cancellation returns the identity to `pending`, retains its incremented attempt count, and
 records an interruption category and timestamp. Its next claim requires explicit retry.
 
+### Color and luminance result catalog
+
+Analyzer identity `color-luminance` / `1.0.0` /
+`rendered-srgb-768-v1` stores nine deterministic measurements:
+
+- mean and median linear-sRGB relative luminance in `[0, 1]`
+- shadow and highlight relative-luminance tail proportions in `[0, 1]`, using inclusive
+  thresholds derived from encoded-sRGB `5/255` and `250/255`
+- mean and median encoded-sRGB HSV saturation proportions in `[0, 1]`
+- direct Hasler–Süsstrunk colorfulness formula output from channels normalized to
+  `[0, 1]`; it is finite and nonnegative but has no claimed universal perceptual range
+- up to five dominant colors from a deterministic four-bit-per-channel RGB histogram,
+  with selected-color proportions summing to one and separate total-pixel coverage
+- three-bit-per-channel histogram Shannon entropy normalized to `[0, 1]`
+
+Luminance-tail proportions describe occupancy near rendered-preview luminance boundaries.
+They cannot establish clipping or available headroom in an original file. JPEG
+compression, source rendering, provider processing, and the absence of a verified ICC
+workflow can affect all preview measurements. Version 1 composites transparency against
+encoded-sRGB `(128, 128, 128)`, applies no ICC conversion, samples every returned pixel,
+and never silently resizes. Method or configuration semantics cannot change without an
+identity version change.
+
 ## Persistence Round Trips
 
 SQLite schema version 6 mirrors the normalized graph:

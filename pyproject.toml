@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Photography Portfolio Analysis contributors" }]
 dependencies = [
+    "numpy==2.5.1",
     "Pillow==12.3.0",
 ]
 
@@ -20,7 +21,6 @@ dev = [
     "ruff>=0.9",
 ]
 research = [
-    "numpy==2.5.1",
     "psutil==7.2.2",
 ]
 
