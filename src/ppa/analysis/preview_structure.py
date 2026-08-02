@@ -27,7 +27,8 @@ NOISE_MINIMUM_COVERAGE = 0.01
 MAD_NORMALIZATION = 0.6744897501960817
 ROUNDING_DIGITS = 12
 
-# Provisional until generated 512/768/1024 validation freezes the smallest passing edge.
+# Generated validation selected 1,024 px because both 512 and 768 failed the
+# predeclared stability gates.
 PREVIEW_EDGE = 1024
 PREVIEW_REQUEST = PreviewRequest(
     maximum_edge=PREVIEW_EDGE,
