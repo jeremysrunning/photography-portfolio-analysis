@@ -223,6 +223,21 @@ spatial frequency according to aspect ratio. Generated landscape, portrait, and 
 fixtures passed the frozen geometry gates; this remains a disclosed method limitation
 rather than a claim about subjects, human attention, intent, or composition quality.
 
+The registry also includes `preview-structure` under immutable identity
+`preview-structure` / `1.0.0` /
+`rendered-srgb-1024-min16-linear-luma-fullres-reflect-lap4var16-sobel4-dirg005-min64-cov001-edge010-jtensor-grid8lc-grid4sv-haarmad-grad005-range010-min64-cov001-p05p95-linear-round12-v1`.
+It consumes every returned pixel of one bounded 1,024 px memory preview while preserving
+aspect ratio. A valid preview smaller than 16 pixels on either axis completes with an
+explicit false measurement-support result and no numeric structure values.
+
+Supported previews use fixed, versioned linear-luminance, Laplacian, Sobel, structure-
+tensor, grid, Haar-residual, percentile, boundary, evidence, and rounding semantics.
+Transient luminance, gradient, convolution, and residual arrays remain inside the analyzer
+call. The measurements describe rendered-preview structure without identifying subjects,
+scenes, photographic causes, intent, or quality. Generated validation rejected the
+proposed texture-density result for cross-resolution instability; it is not registered or
+persisted.
+
 ### Blocked people and face analysis
 
 Issue #38 is not implementation-ready. Issue #49 found that the evaluated NanoDet and

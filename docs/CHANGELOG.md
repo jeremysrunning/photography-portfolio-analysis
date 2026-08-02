@@ -10,6 +10,10 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- The production `preview-structure` analyzer with deterministic support disclosure,
+  normalized Laplacian sharpness, gradient-directional anisotropy, edge density, local
+  luminance contrast, spatial sharpness variation, edge-suppressed Haar residual, and
+  percentile luminance-span measurements from bounded rendered previews.
 - The production `composition-saliency` analyzer with deterministic spectral-residual
   evidence, normalized centroid and spread, fixed 3×3 regional mass, and neutral
   center/thirds distance measurements from bounded temporary previews.
