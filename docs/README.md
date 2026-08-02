@@ -194,6 +194,24 @@ and processed work, state-excluded identities, and remaining work within that in
 In particular, ordinary pending identities excluded by `--only-failed` are not reported
 as remaining failed-only work.
 
+The deterministic composition and saliency analyzer is `composition-saliency`:
+
+```powershell
+ppa analyze visual portfolio.sqlite3 --analyzer composition-saliency
+```
+
+It requests a bounded 512 px memory preview and calculates a spectral-residual map on a
+fixed 128×128 encoded-sRGB luminance representation. It records whether the map has
+enough relative spatial variation under the versioned evidence rule, then conditionally
+records a normalized centroid, normalized spread, and neutral distances to frame center
+and rule-of-thirds geometry. A fixed row-major 3×3 result records regional saliency mass
+when the map has normalizable mass.
+
+Uniform and weak-evidence images complete successfully. They do not receive a fabricated
+centroid or centroid-dependent distances. The analyzer does not identify a subject,
+person, object, scene, human attention, photographer intent, compositional compliance,
+or image quality. Preview pixels and transient saliency maps are never persisted.
+
 Completed work is skipped unless `--refresh` is supplied. `--retry-failed` includes durable
 failures and cancellation-interrupted pending work; `--only-failed` includes only durable
 failures. Existing `running` work is never reclaimed automatically and is reported as

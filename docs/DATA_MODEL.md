@@ -170,6 +170,36 @@ encoded-sRGB `(128, 128, 128)`, applies no ICC conversion, samples every returne
 and never silently resizes. Method or configuration semantics cannot change without an
 identity version change.
 
+### Composition and saliency result catalog
+
+Analyzer identity `composition-saliency` / `1.0.0` /
+`rendered-srgb-512-stretch128-bilinear-sr-box3-smooth5-logeps1e-9-masseps1e-12-rd005-grid3-round8-v1`
+stores deterministic measurements from a transient spectral-residual saliency map:
+
+- `saliency_evidence`: boolean; true exactly when map mean exceeds `1e-12` and population
+  standard deviation divided by mean is at least `0.05`
+- `saliency_centroid`: top-left-origin saliency-mass-weighted normalized point, emitted
+  only when evidence exists
+- `saliency_spread`: saliency-weighted root-mean-square centroid distance divided by the
+  frame diagonal, emitted only when evidence exists
+- `saliency_grid_3x3`: nine regional mass proportions in row-major order, emitted whenever
+  total map mass exceeds `1e-12`
+- `saliency_center_distance`: centroid-to-frame-center distance divided by `sqrt(2)/2`
+- `saliency_thirds_line_distance`: minimum centroid distance to a vertical or horizontal
+  thirds line divided by `1/3`
+- `saliency_thirds_intersection_distance`: minimum centroid distance to a thirds
+  intersection divided by `sqrt(2)/3`
+
+The grid uses cell-center assignment with boundaries at one-third and two-thirds. Exact
+boundary coordinates enter the later region. Its first eight masses use eight-decimal
+half-even rounding, and the ninth is the remainder from `1.00000000`. Centroid-dependent
+results are absent rather than null when evidence is weak. A zero-mass valid image still
+completes with `saliency_evidence = false`.
+
+These values describe only the configured saliency representation. They do not identify
+subjects, people, objects, scenes, human attention, intent, quality, or compliance with a
+compositional rule. No preview, map, array, image, or path is persisted.
+
 ## Persistence Round Trips
 
 SQLite schema version 6 mirrors the normalized graph:

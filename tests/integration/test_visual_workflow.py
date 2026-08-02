@@ -7,6 +7,7 @@ import pytest
 from PIL import Image
 
 from ppa.analysis.color_luminance import ColorLuminanceAnalyzer
+from ppa.analysis.composition_saliency import CompositionSaliencyAnalyzer
 from ppa.core.visual_workflow import (
     VisualAnalysisOptions,
     VisualWorkflowError,
@@ -242,6 +243,64 @@ def test_production_color_luminance_analyzer_persists_and_resumes(tmp_path) -> N
         "dominant_palette",
         "palette_entropy",
     }
+
+
+def test_production_composition_saliency_persists_resumes_and_refreshes(tmp_path) -> None:
+    portfolio, database = _saved(tmp_path)
+    analyzer = CompositionSaliencyAnalyzer()
+    sources: list[FakeSource] = []
+
+    def source_factory(*_):
+        source = FakeSource()
+        sources.append(source)
+        return source
+
+    first = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=source_factory,
+    )
+    resumed = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=source_factory,
+    )
+    refreshed = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1, refresh=True),
+        source_factory=source_factory,
+    )
+
+    assert first.completed == 1
+    assert resumed.already_completed_excluded == 1
+    assert refreshed.completed == 1
+    assert all(resource.closed for source in sources for resource in source.resources)
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+    assert snapshot.state.status is VisualRunStatus.COMPLETED
+    assert snapshot.state.attempts == 2
+    assert snapshot.state.last_successful_completed_at is not None
+    assert {result.name for result in snapshot.results} == {
+        "saliency_evidence",
+        "saliency_grid_3x3",
+    }
+    assert all(
+        result.completed_at == snapshot.state.last_successful_completed_at
+        for result in snapshot.results
+    )
+    serialized = repr(tuple(result.value for result in snapshot.results)).casefold()
+    assert all(word not in serialized for word in ("image", "preview", "path", "url"))
 
 
 def test_filters_and_limit_follow_deterministic_asset_order(tmp_path) -> None:

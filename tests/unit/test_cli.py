@@ -24,11 +24,12 @@ def test_init_db_command_creates_database(tmp_path) -> None:
     assert database.exists()
 
 
-def test_visual_command_lists_first_registered_production_analyzer(capsys) -> None:
+def test_visual_command_lists_registered_production_analyzers(capsys) -> None:
     assert main(["analyze", "visual", "missing.sqlite3", "--list-analyzers"]) == 0
     assert capsys.readouterr().out.splitlines() == [
         "Registered visual analyzers:",
         "  color-luminance",
+        "  composition-saliency",
     ]
 
 
