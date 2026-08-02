@@ -232,6 +232,13 @@ def test_no_visual_rows_selects_current_identities_and_reports_pending() -> None
     assert all(item.evidence.successful_snapshots == 0 for item in report.analyzers)
     assert report.yearly_differences == ()
 
+    rendered = render_visual_habits(report, details=True)
+    assert "0 / 0 (0.0%)" not in rendered
+    assert (
+        "Structure measurement support: unavailable (no completed selected-identity snapshots)"
+    ) in rendered
+    assert "No complete selected-identity measurement snapshots are available." in rendered
+
 
 def test_complete_catalogs_produce_scalar_point_grid_and_palette_aggregates() -> None:
     portfolio = _portfolio()

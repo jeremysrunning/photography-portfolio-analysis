@@ -8,6 +8,8 @@ from ppa.analysis.visual_habits import (
     VisualHabitsReport,
 )
 
+_NO_COMPLETED_SNAPSHOTS = "unavailable (no completed selected-identity snapshots)"
+
 
 def render_visual_habits(
     report: VisualHabitsReport,
@@ -112,10 +114,13 @@ def _add_composition(lines: list[str], analyzer: AnalyzerHabits) -> None:
     lines.append(f"  Saliency evidence: {_coverage(evidence.true_count, evidence.count)}")
     if analyzer.point is not None:
         point = analyzer.point
-        lines.append(
-            f"  Saliency centroid: n={point.count:,}/{point.denominator:,}; "
-            f"median x {_number(point.median_x)}, median y {_number(point.median_y)}"
-        )
+        if point.denominator == 0:
+            lines.append(f"  Saliency centroid: {_NO_COMPLETED_SNAPSHOTS}")
+        else:
+            lines.append(
+                f"  Saliency centroid: n={point.count:,}/{point.denominator:,}; "
+                f"median x {_number(point.median_x)}, median y {_number(point.median_y)}"
+            )
     _add_scalar_lines(lines, analyzer)
     if analyzer.regional_mass is not None:
         grid = analyzer.regional_mass
@@ -219,6 +224,8 @@ def _add_scalar_lines(lines: list[str], analyzer: AnalyzerHabits) -> None:
 
 
 def _summary(summary: ScalarSummary) -> str:
+    if summary.denominator == 0:
+        return _NO_COMPLETED_SNAPSHOTS
     return (
         f"n={summary.count:,}/{summary.denominator:,} ({summary.percent:.1f}%); "
         f"min {_number(summary.minimum)}, median {_number(summary.median)}, "
@@ -238,11 +245,13 @@ def _boolean(analyzer: AnalyzerHabits, name: str):
 
 
 def _coverage(available: int, total: int) -> str:
+    if total == 0:
+        return _NO_COMPLETED_SNAPSHOTS
     return f"{available:,} / {total:,} ({_percent(available, total)})"
 
 
 def _percent(available: int, total: int) -> str:
-    return f"{available / total * 100 if total else 0.0:.1f}%"
+    return f"{available / total * 100:.1f}%"
 
 
 def _number(value: float) -> str:
