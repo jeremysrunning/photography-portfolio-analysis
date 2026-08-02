@@ -209,6 +209,20 @@ the no-ICC provider-rendered-sRGB assumption are configuration semantics. Compat
 multi-analyzer preview sharing remains deferred until at least two real analyzers establish
 their preview, memory, failure, and partial-completion requirements.
 
+The registry also includes the deterministic `composition-saliency` analyzer under
+immutable identity `composition-saliency` / `1.0.0` /
+`rendered-srgb-512-stretch128-bilinear-sr-box3-smooth5-logeps1e-9-masseps1e-12-rd005-grid3-round8-v1`.
+It consumes one bounded 512 px memory preview, converts the rendered preview into a fixed
+128×128 luminance representation, and persists only compact spectral-residual evidence
+and normalized geometry. Uniform or weak-evidence maps complete without a fabricated
+centroid. Source previews, FFT arrays, and saliency maps remain inside the analyzer call
+and never cross the repository boundary.
+
+The square working representation preserves the complete normalized frame but stretches
+spatial frequency according to aspect ratio. Generated landscape, portrait, and square
+fixtures passed the frozen geometry gates; this remains a disclosed method limitation
+rather than a claim about subjects, human attention, intent, or composition quality.
+
 ### Blocked people and face analysis
 
 Issue #38 is not implementation-ready. Issue #49 found that the evaluated NanoDet and

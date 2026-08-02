@@ -10,6 +10,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- The production `composition-saliency` analyzer with deterministic spectral-residual
+  evidence, normalized centroid and spread, fixed 3×3 regional mass, and neutral
+  center/thirds distance measurements from bounded temporary previews.
 - A predeclared, privacy-bounded research method and aggregate-only tooling for Issue #49
   person/face detector threshold, NMS, and preview-size calibration; no production analyzer
   is registered while calibration remains unresolved.

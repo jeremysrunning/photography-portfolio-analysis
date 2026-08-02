@@ -457,10 +457,33 @@ set the end-to-end rate.
 
 ### Issue #39 — composition and saliency
 
-- preview: provisional 512 px for spectral-residual centroid/spread; 768 px for edge-based
-  structure
-- algorithm: deterministic spectral residual plus normalized geometry
-- readiness: usable with caveats after real validation
+- production preview: 512 px bounded memory resource
+- algorithm: deterministic spectral residual on a fixed 128×128 square luminance
+  representation plus evidence-aware normalized geometry
+- working-resolution validation: 64×64 and 96×96 failed at least one predeclared gate
+  against 128×128, so 128×128 is the smallest passing immutable configuration; 64×64
+  changed evidence and reached `0.1703` regional-mass L1 against the `0.15` gate, while
+  96×96 changed evidence despite remaining within every numeric-difference gate
+- square-stretch validation: controlled landscape, portrait, and square fixtures passed
+  the predeclared evidence, centroid, spread, regional-mass, and distance gates; observed
+  maxima were `0.0046` frame-diagonal centroid distance, `0.0047` spread difference, and
+  `0.0565` regional-mass L1
+- brightness validation: non-clipping 0.5×, 1.0×, and 1.5× generated fixtures preserved
+  evidence and passed the predeclared geometry and regional-mass tolerances; observed
+  maxima were `0.0011` frame-diagonal centroid distance, `0.0006` spread difference, and
+  `0.0134` regional-mass L1
+- bounded real validation: 20 selected photographs completed with no failures or skips in
+  21 seconds at 0.96 photographs/second; 1,158,654 preview bytes were downloaded, all
+  persisted numeric results remained in `[0, 1]`, and every regional distribution summed
+  exactly to `1.0`
+- resume validation: a second command selected no work, excluded all 20 completed
+  identities, and downloaded zero bytes
+- observed process peak working set: 621,436,928 bytes (about 592.6 MiB), including the
+  interpreter, NumPy, Pillow, loaded 128 MB SQLite database, provider/client state, and
+  transient arrays rather than analyzer memory alone
+- cleanup: no preview or image file was retained, and the temporary database, command
+  output, and validation directory were removed after aggregate inspection
+- readiness: production analyzer implemented and bounded validation complete
 - failures: uniform frames, repeated textures, bright borders, multiple salient regions,
   disagreement with human attention
 - defer horizon, symmetry, negative space, leading lines, and visual-weight claims until
