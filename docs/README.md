@@ -212,6 +212,27 @@ centroid or centroid-dependent distances. The analyzer does not identify a subje
 person, object, scene, human attention, photographer intent, compositional compliance,
 or image quality. Preview pixels and transient saliency maps are never persisted.
 
+The deterministic preview-structure analyzer is `preview-structure`:
+
+```powershell
+ppa analyze visual portfolio.sqlite3 --analyzer preview-structure
+```
+
+It requests a bounded 1,024 px memory preview, preserves its aspect ratio, and analyzes
+every returned pixel without cropping, stretching, internal downsampling, or upscaling.
+It records whether both decoded dimensions provide the configured minimum 16-pixel
+measurement support. Smaller valid previews complete successfully with support false and
+no fabricated numeric measurements.
+
+Supported previews produce compact deterministic measurements for normalized Laplacian
+sharpness, gradient-directional evidence and anisotropy, Sobel edge density, local
+luminance contrast, spatial sharpness variation, edge-suppressed Haar residual evidence,
+and the 95th-to-5th-percentile luminance span. These values describe provider-rendered
+preview structure only. They do not establish original-file sharpness, focus accuracy,
+depth of field, motion, lens behavior, sensor noise, scene content, intent, or quality.
+The proposed texture-density measurement was rejected by generated preview-size validation
+and is not part of the production catalog.
+
 Completed work is skipped unless `--refresh` is supplied. `--retry-failed` includes durable
 failures and cancellation-interrupted pending work; `--only-failed` includes only durable
 failures. Existing `running` work is never reclaimed automatically and is reported as

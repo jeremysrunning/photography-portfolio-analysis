@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 from PIL import Image
 
+from ppa.analysis.image_normalization import normalized_srgb
 from ppa.models import Asset
 from ppa.sources import PreviewMetadata, PreviewRequest, PreviewStorageMode
 from ppa.visual import AnalyzerIdentity, VisualResult, VisualResultKind
@@ -61,7 +62,7 @@ class ColorLuminanceAnalyzer:
     ) -> tuple[VisualResult, ...]:
         """Return the complete deterministic result catalog for one preview."""
         del asset, metadata
-        rgb = _normalized_srgb(image)
+        rgb = normalized_srgb(image)
         encoded = rgb.astype(np.float64) / 255.0
         linear = np.where(
             encoded <= 0.04045,
@@ -213,24 +214,6 @@ def compare_palettes(
         proportion_l1=_rounded(proportion_difference / 2),
         assignments=assignments,
     )
-
-
-def _normalized_srgb(image: Image.Image) -> np.ndarray:
-    if image.width < 1 or image.height < 1:
-        raise ValueError("preview dimensions must be positive")
-    if image.mode in {"I;16", "I;16L", "I;16B", "I;16N"}:
-        values = np.asarray(image, dtype=np.float64)
-        gray = np.rint(np.clip(values, 0, 65535) * (255 / 65535)).astype(np.uint8)
-        return np.repeat(gray[..., None], 3, axis=2)
-    if image.mode in {"I", "F"}:
-        raise ValueError(f"unsupported preview numeric mode: {image.mode}")
-    if image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info):
-        rgba = image.convert("RGBA")
-        background = Image.new("RGBA", rgba.size, (128, 128, 128, 255))
-        normalized = Image.alpha_composite(background, rgba).convert("RGB")
-    else:
-        normalized = image.convert("RGB")
-    return np.asarray(normalized, dtype=np.uint8).copy()
 
 
 def _palette(encoded: np.ndarray) -> tuple[tuple[PaletteColor, ...], float]:

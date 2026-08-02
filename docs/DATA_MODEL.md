@@ -200,6 +200,40 @@ These values describe only the configured saliency representation. They do not i
 subjects, people, objects, scenes, human attention, intent, quality, or compliance with a
 compositional rule. No preview, map, array, image, or path is persisted.
 
+### Preview-structure result catalog
+
+Analyzer identity `preview-structure` / `1.0.0` /
+`rendered-srgb-1024-min16-linear-luma-fullres-reflect-lap4var16-sobel4-dirg005-min64-cov001-edge010-jtensor-grid8lc-grid4sv-haarmad-grad005-range010-min64-cov001-p05p95-linear-round12-v1`
+stores deterministic rendered-preview structure measurements:
+
+- `structure_measurement_support`: true exactly when width and height are both at least
+  16 pixels; when false, it is the only result in the successful snapshot
+- `global_sharpness_proxy`: four-neighbor Laplacian population variance divided by 16
+- `gradient_directional_evidence`: whether normalized Sobel evidence meets the fixed
+  pixel-count and coverage requirements
+- `gradient_directional_anisotropy`: structure-tensor eigenvalue anisotropy, emitted only
+  with directional evidence
+- `edge_density`: proportion of normalized Sobel magnitudes at or above 0.10
+- `local_luminance_contrast`: mean normalized population deviation over an 8×8 frame grid
+- `spatial_sharpness_variation`: normalized population deviation of Laplacian variance
+  over a 4×4 frame grid
+- `noise_proxy_evidence`: whether enough low-gradient 2×2 blocks support residual
+  measurement
+- `noise_residual_mad`: robust diagonal-Haar residual magnitude in relative linear-
+  luminance units, emitted only with evidence
+- `luminance_p95_p05_span`: linear-luminance 95th percentile minus 5th percentile
+
+Scalar values are calculated from unrounded float64 intermediates and rounded only on
+output to 12 decimal places. Convolutions use reflected boundaries. Grid assignment uses
+normalized pixel centers and assigns exact boundaries to the later region. The analyzer
+preserves preview aspect ratio and performs no crop, square stretch, internal resize, or
+upscale.
+
+These are provider-preview proxies. They do not diagnose original-file sharpness, focus,
+depth of field, camera or subject motion, lens behavior, sensor noise, scene content,
+intent, technical quality, or aesthetic quality. No texture-density measurement is
+persisted because its generated cross-resolution validation failed the frozen gate.
+
 ## Persistence Round Trips
 
 SQLite schema version 6 mirrors the normalized graph:

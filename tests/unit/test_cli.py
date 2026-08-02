@@ -30,6 +30,7 @@ def test_visual_command_lists_registered_production_analyzers(capsys) -> None:
         "Registered visual analyzers:",
         "  color-luminance",
         "  composition-saliency",
+        "  preview-structure",
     ]
 
 
