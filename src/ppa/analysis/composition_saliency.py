@@ -9,6 +9,7 @@ from math import floor, hypot, isfinite, sqrt
 import numpy as np
 from PIL import Image
 
+from ppa.analysis.image_normalization import normalized_srgb
 from ppa.models import Asset, JsonValue
 from ppa.sources import PreviewMetadata, PreviewRequest, PreviewStorageMode
 from ppa.visual import AnalyzerIdentity, NormalizedPoint, VisualResult, VisualResultKind
@@ -251,7 +252,7 @@ def normalized_centroid_distances(x: float, y: float) -> tuple[float, float, flo
 
 
 def _working_luminance(image: Image.Image, working_size: int) -> np.ndarray:
-    rgb = _normalized_srgb(image)
+    rgb = normalized_srgb(image)
     encoded = rgb.astype(np.float64) / 255.0
     luminance = encoded[..., 0] * 0.2126 + encoded[..., 1] * 0.7152 + encoded[..., 2] * 0.0722
     quantized = np.rint(np.clip(luminance, 0.0, 1.0) * 255).astype(np.uint8)
@@ -260,24 +261,6 @@ def _working_luminance(image: Image.Image, working_size: int) -> np.ndarray:
         Image.Resampling.BILINEAR,
     )
     return np.asarray(working, dtype=np.float64) / 255.0
-
-
-def _normalized_srgb(image: Image.Image) -> np.ndarray:
-    if image.width < 1 or image.height < 1:
-        raise ValueError("preview dimensions must be positive")
-    if image.mode in {"I;16", "I;16L", "I;16B", "I;16N"}:
-        values = np.asarray(image, dtype=np.float64)
-        gray = np.rint(np.clip(values, 0, 65535) * (255 / 65535)).astype(np.uint8)
-        return np.repeat(gray[..., None], 3, axis=2)
-    if image.mode in {"I", "F"}:
-        raise ValueError(f"unsupported preview numeric mode: {image.mode}")
-    if image.mode in {"RGBA", "LA"} or (image.mode == "P" and "transparency" in image.info):
-        rgba = image.convert("RGBA")
-        background = Image.new("RGBA", rgba.size, (128, 128, 128, 255))
-        normalized = Image.alpha_composite(background, rgba).convert("RGB")
-    else:
-        normalized = image.convert("RGB")
-    return np.asarray(normalized, dtype=np.uint8).copy()
 
 
 def _spectral_residual_map(luminance: np.ndarray) -> np.ndarray:

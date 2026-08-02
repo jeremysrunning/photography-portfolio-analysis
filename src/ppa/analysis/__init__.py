@@ -12,6 +12,7 @@ from ppa.analysis.focal_length import (
     FocalLengthYearChange,
     analyze_focal_lengths,
 )
+from ppa.analysis.preview_structure import PreviewStructureAnalyzer
 from ppa.analysis.timeline import (
     CameraEra,
     CaptureGap,
@@ -31,6 +32,7 @@ from ppa.analysis.visual import (
 
 register_visual_analyzer(ColorLuminanceAnalyzer())
 register_visual_analyzer(CompositionSaliencyAnalyzer())
+register_visual_analyzer(PreviewStructureAnalyzer())
 
 __all__ = [
     "BaselineReport",
@@ -46,6 +48,7 @@ __all__ = [
     "FocalLengthSummary",
     "FocalLengthYearChange",
     "PeriodCount",
+    "PreviewStructureAnalyzer",
     "TimelineReport",
     "TimelineSegment",
     "VisualAnalyzer",

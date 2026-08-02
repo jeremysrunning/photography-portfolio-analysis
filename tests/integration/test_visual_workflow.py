@@ -8,6 +8,7 @@ from PIL import Image
 
 from ppa.analysis.color_luminance import ColorLuminanceAnalyzer
 from ppa.analysis.composition_saliency import CompositionSaliencyAnalyzer
+from ppa.analysis.preview_structure import PreviewStructureAnalyzer
 from ppa.core.visual_workflow import (
     VisualAnalysisOptions,
     VisualWorkflowError,
@@ -299,6 +300,159 @@ def test_production_composition_saliency_persists_resumes_and_refreshes(tmp_path
         result.completed_at == snapshot.state.last_successful_completed_at
         for result in snapshot.results
     )
+
+
+def test_production_preview_structure_persists_resumes_refreshes_and_cleans_up(tmp_path) -> None:
+    portfolio, database = _saved(tmp_path)
+    analyzer = PreviewStructureAnalyzer()
+    sources: list[FakeSource] = []
+
+    def source_factory(*_):
+        source = FakeSource()
+        sources.append(source)
+        return source
+
+    first = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=source_factory,
+    )
+    resumed = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=source_factory,
+    )
+    refreshed = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1, refresh=True),
+        source_factory=source_factory,
+    )
+
+    assert first.completed == 1
+    assert resumed.already_completed_excluded == 1
+    assert refreshed.completed == 1
+    assert all(resource.closed for source in sources for resource in source.resources)
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+    assert snapshot.state.status is VisualRunStatus.COMPLETED
+    assert snapshot.state.attempts == 2
+    assert [result.name for result in snapshot.results] == [
+        "edge_density",
+        "global_sharpness_proxy",
+        "gradient_directional_evidence",
+        "local_luminance_contrast",
+        "luminance_p95_p05_span",
+        "noise_proxy_evidence",
+        "noise_residual_mad",
+        "spatial_sharpness_variation",
+        "structure_measurement_support",
+    ]
+    assert all(
+        result.completed_at == snapshot.state.last_successful_completed_at
+        for result in snapshot.results
+    )
+
+
+def test_small_preview_is_successful_unsupported_measurement_not_failure(tmp_path) -> None:
+    portfolio, database = _saved(tmp_path)
+    analyzer = PreviewStructureAnalyzer()
+
+    class SmallSource(FakeSource):
+        def open_preview(self, asset, request, *, is_cancelled=None):
+            image = Image.new("RGB", (15, 16), "white")
+            resource = PreviewResource.memory(
+                PreviewMetadata(
+                    requested_maximum_edge=request.maximum_edge,
+                    width=15,
+                    height=16,
+                    content_type="image/jpeg",
+                    downloaded_content_type="image/jpeg",
+                    downloaded_encoded_byte_count=50,
+                    provenance="fake",
+                    storage_mode=PreviewStorageMode.MEMORY,
+                ),
+                image,
+            )
+            self.resources.append(resource)
+            return resource
+
+    source = SmallSource()
+    result = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=lambda *_: source,
+    )
+
+    assert result.completed == 1
+    assert result.failed == result.skipped == 0
+    assert source.resources[0].closed
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+    assert snapshot.state.status is VisualRunStatus.COMPLETED
+    assert len(snapshot.results) == 1
+    assert snapshot.results[0].name == "structure_measurement_support"
+    assert snapshot.results[0].value is False
+
+
+def test_supported_invalid_numeric_preview_is_analyzer_failure_and_cleans_up(tmp_path) -> None:
+    portfolio, database = _saved(tmp_path)
+    analyzer = PreviewStructureAnalyzer()
+
+    class InvalidSource(FakeSource):
+        def open_preview(self, asset, request, *, is_cancelled=None):
+            image = Image.new("F", (32, 24), 0.5)
+            resource = PreviewResource.memory(
+                PreviewMetadata(
+                    requested_maximum_edge=request.maximum_edge,
+                    width=32,
+                    height=24,
+                    content_type="image/tiff",
+                    downloaded_content_type="image/tiff",
+                    downloaded_encoded_byte_count=50,
+                    provenance="fake",
+                    storage_mode=PreviewStorageMode.MEMORY,
+                ),
+                image,
+            )
+            self.resources.append(resource)
+            return resource
+
+    source = InvalidSource()
+    result = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        analyzer,
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=lambda *_: source,
+    )
+
+    assert result.failed == 1
+    assert result.completed == result.skipped == 0
+    assert source.resources[0].closed
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot(
+            "smugmug", "portfolio", "photo-a", analyzer.identity
+        )
+    assert snapshot.state.status is VisualRunStatus.FAILED
+    assert snapshot.state.error_category == "analyzer_error"
+    assert snapshot.results == ()
     serialized = repr(tuple(result.value for result in snapshot.results)).casefold()
     assert all(word not in serialized for word in ("image", "preview", "path", "url"))
 
