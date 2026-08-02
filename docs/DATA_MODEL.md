@@ -234,6 +234,34 @@ depth of field, camera or subject motion, lens behavior, sensor noise, scene con
 intent, technical quality, or aesthetic quality. No texture-density measurement is
 persisted because its generated cross-resolution validation failed the frozen gate.
 
+## Visual-Habits Report Model
+
+The read-only repository boundary exposes a transient `VisualAnalysisRecord` containing a
+normalized `Asset` and one exact-identity `VisualAnalysisSnapshot`. It does not expose a
+separate provider asset identifier. The record exists only to associate normalized
+metadata with persisted state during pure aggregation.
+
+The immutable `VisualHabitsReport` separates:
+
+- selected identities and excluded historical identities
+- current run-state counts and retained successful-snapshot counts
+- complete, incomplete, malformed/condition-inconsistent, and extra-bearing catalogs
+- result-level and conditional evidence availability
+- scalar, point, regional-mass, and quantized-palette summaries
+- qualifying gallery, year, camera, lens, and orientation segments
+- qualifying adjacent-year median differences
+- unavailable semantic analyzer families
+
+No report result type contains an asset identity, source ID, URL, preview reference, or
+source client. Missing conditional values remain absent. False evidence/support values are
+successful deterministic results and are not equivalent to failure or numeric zero.
+
+Expected catalogs are forward-compatible: unknown extra result names are ignored for
+aggregation and disclosed separately. Missing required results make a snapshot incomplete;
+malformed or condition-inconsistent expected results invalidate that expected catalog.
+Historical analyzer/configuration identities are retained by SQLite but never mixed into
+the registered identity's distributions.
+
 ## Persistence Round Trips
 
 SQLite schema version 6 mirrors the normalized graph:

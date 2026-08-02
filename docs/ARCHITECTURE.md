@@ -259,6 +259,37 @@ require a separate future issue after Issue #38 is unblocked. Issue #42's people
 and subject-placement sections depend on Issue #38 and must remain absent until persisted
 production results exist. Issues #40 and #41 have no Issue #38 dependency.
 
+## Visual Habits Reporting
+
+The visual-habits report follows a strictly read-only application path:
+
+```text
+repository bulk read
+        -> pure aggregation
+        -> immutable report model
+        -> text renderer
+        -> CLI
+```
+
+The repository lists persisted analyzer identities and bulk-loads one exact identity as
+normalized `Asset` objects paired with `VisualAnalysisSnapshot` values. SQLite may use
+source identifiers internally, but the application record exposes no separate provider
+asset ID. Assets are transient aggregation inputs; the final report model contains no
+per-image identity, URL, preview reference, or source client.
+
+Aggregation always selects the exact registered production identity for each of the three
+deterministic analyzer families. Historical identities are disclosed and excluded; there
+is no automatic fallback, cross-version aggregation, or supersession policy. Current run
+state remains separate from retained last-successful evidence. Catalog validation checks
+required names, kinds, units, structured shapes, finite values, and conditional presence.
+Unknown extra names are counted and ignored without invalidating an otherwise complete
+expected catalog.
+
+Renderers receive only the immutable aggregate result. They contain no SQL and cannot
+fetch previews, invoke analyzers or models, construct source clients, require an API key,
+or mutate SQLite. People/face and scene/environment findings remain unavailable while
+Issues #38 and #40 are blocked.
+
 Saves transactionally upsert records by source-scoped identity. The first normalized
 occurrence of a repeated asset supplies its canonical fields, matching analyzer
 deduplication. Records missing from later crawls are retained unless a future explicit
