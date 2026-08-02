@@ -9,10 +9,13 @@ from pathlib import Path
 
 from ppa import __version__
 from ppa.analysis import (
+    PRODUCTION_IDENTITIES,
+    VisualAnalyzerDataset,
     analyze_baseline,
     analyze_equipment,
     analyze_focal_lengths,
     analyze_timeline,
+    analyze_visual_habits,
     get_visual_analyzer,
     list_visual_analyzers,
 )
@@ -40,6 +43,7 @@ from ppa.reports import (
     render_equipment,
     render_focal_lengths,
     render_timeline,
+    render_visual_habits,
 )
 from ppa.sources import SourceError, SourceRateLimitError
 from ppa.storage.sqlite import SQLitePortfolioRepository
@@ -159,6 +163,28 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include complete per-gallery timeline distributions.",
     )
+    visual_habits = report_commands.add_parser(
+        "visual-habits",
+        help="Aggregate persisted deterministic visual measurements.",
+    )
+    _add_database_selection(visual_habits)
+    visual_habits.add_argument(
+        "--details",
+        action="store_true",
+        help="Include detailed measurement evidence and provenance.",
+    )
+    for option, help_text in (
+        ("gallery", "Include qualifying per-gallery visual measurements."),
+        ("year", "Include qualifying per-capture-year visual measurements."),
+        ("camera", "Include qualifying per-camera visual measurements."),
+        ("lens", "Include qualifying per-lens visual measurements."),
+        ("orientation", "Include qualifying per-orientation visual measurements."),
+    ):
+        visual_habits.add_argument(
+            f"--{option}-breakdown",
+            action="store_true",
+            help=help_text,
+        )
     analyze = commands.add_parser("analyze", help="Run persisted portfolio analyzers.")
     analyze_commands = analyze.add_subparsers(dest="analyze_command", required=True)
     visual = analyze_commands.add_parser(
@@ -298,6 +324,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
             )
             return 0
+        if args.report_command == "visual-habits":
+            report = _analyze_stored_visual_habits(portfolio, args.database)
+            print(
+                render_visual_habits(
+                    report,
+                    details=args.details,
+                    gallery_breakdown=args.gallery_breakdown,
+                    year_breakdown=args.year_breakdown,
+                    camera_breakdown=args.camera_breakdown,
+                    lens_breakdown=args.lens_breakdown,
+                    orientation_breakdown=args.orientation_breakdown,
+                )
+            )
+            return 0
     if args.command == "enrich" and args.enrich_command == "exif":
         if not args.api_key:
             parser.error(
@@ -386,6 +426,19 @@ def _print_stored_portfolio(portfolio: Portfolio) -> None:
     print(f"Unique photographs: {baseline.unique_photographs:,}")
     print(f"Non-photo media excluded: {baseline.excluded_non_photographs:,}")
     print(f"Additional gallery placements: {baseline.duplicate_references:,}")
+
+
+def _analyze_stored_visual_habits(portfolio: Portfolio, database: Path):
+    with SQLitePortfolioRepository(database) as repository:
+        persisted_identities = repository.list_visual_analysis_identities(portfolio)
+        datasets = tuple(
+            VisualAnalyzerDataset(
+                identity,
+                repository.list_visual_analysis_records(portfolio, identity),
+            )
+            for identity in PRODUCTION_IDENTITIES
+        )
+    return analyze_visual_habits(portfolio, datasets, persisted_identities)
 
 
 def _enrich_exif(portfolio: Portfolio, args: argparse.Namespace) -> int:

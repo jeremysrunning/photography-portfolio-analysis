@@ -368,6 +368,40 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
     assert "Gallery Breakdown" in detailed_focal_output
     assert "Year Breakdown" in detailed_focal_output
 
+    assert main(["report", "visual-habits", str(database)]) == 0
+    visual_output = capsys.readouterr().out
+    assert "Visual-habits report: Example Portfolio" in visual_output
+    assert "Eligible photographs: 1" in visual_output
+    assert visual_output.count("Current states: 0 completed") == 3
+    assert "Detailed Measurement Evidence" not in visual_output
+
+    assert (
+        main(
+            [
+                "report",
+                "visual-habits",
+                str(database),
+                "--details",
+                "--gallery-breakdown",
+                "--year-breakdown",
+                "--camera-breakdown",
+                "--lens-breakdown",
+                "--orientation-breakdown",
+            ]
+        )
+        == 0
+    )
+    detailed_visual_output = capsys.readouterr().out
+    for heading in (
+        "Detailed Measurement Evidence",
+        "Gallery Comparison",
+        "Capture-Year Breakdown",
+        "Camera Comparison",
+        "Lens Comparison",
+        "Orientation Comparison",
+    ):
+        assert detailed_visual_output.count(heading) == 1
+
 
 def test_enrich_exif_updates_saved_asset(monkeypatch, tmp_path, capsys) -> None:
     database = tmp_path / "portfolio.sqlite3"
