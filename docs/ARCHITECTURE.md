@@ -83,7 +83,7 @@ Responsible for:
 - discovering galleries
 - indexing assets
 - extracting metadata
-- preparing images for analysis
+- composing normalized portfolio records
 
 Ingestion should never perform analysis.
 
@@ -114,6 +114,37 @@ Analyzers should not depend on the original portfolio source.
 Reports transform findings into something meaningful for photographers.
 
 The goal is insight, not statistics for their own sake.
+
+## Implemented Pipeline
+
+The implemented application pipeline has explicit persistence and preview boundaries. A
+stage may participate in more than one CLI workflow, but ownership and side effects do not
+move between layers.
+
+| Stage | Owner | Provider-specific? | Reads SQLite? | Writes SQLite? | Credentials? | Preview access? | Resume, retry, and failure behavior | Primary CLI entry point |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Source discovery | `GallerySource`; currently `SmugMugSource` | Yes | No | No | Yes for SmugMug | No | The source client applies bounded transient and rate-limit retries; a terminal failure stops inspection before persistence. | `ppa inspect`, `ppa import` |
+| Gallery and asset enumeration | `GallerySource` linked-resource iterators | Yes | No | No | Yes for SmugMug | No | Pagination and source retries are bounded; enumeration failure prevents construction of a partial normalized portfolio. | `ppa inspect`, `ppa import` |
+| Normalization and composition | `ppa.sources.load_portfolio` plus immutable domain models | No | No | No | No additional credentials | No | Composition is deterministic and in memory; source exceptions propagate without persisting a partial graph. | `ppa inspect`, `ppa import` |
+| Transactional normalized persistence | `PortfolioRepository`; currently SQLite | No | Yes | Yes | No | No | One save transaction rolls back on failure and preserves the prior committed database state. Later crawls conservatively retain absent records. | `ppa inspect --database`, `ppa import`, `ppa init-db` |
+| Incremental metadata enrichment | application workflow, source enricher, and repository | Source access only | Yes | Yes | Yes for SmugMug | No | Completed records resume without another request; durable failures require explicit retry; bounded source retries and rate limiting preserve successful per-asset commits. | `ppa enrich exif`, `ppa import` |
+| Stored-dataset inspection and metadata analysis | normalized portfolio readers and `ppa.analysis` metadata analyzers | No | Yes through the CLI load | No | No | No | Inspection and pure analysis have no retry state and preserve missing evidence as missing. | `ppa show`; `ppa report baseline`, `equipment`, `focal-length`, `timeline` |
+| Bounded preview acquisition | `GallerySource.open_preview` | Yes | No | No | Yes for SmugMug | Yes, temporarily | The source owns response, decoded-image, and optional temporary-file cleanup. Visual orchestration applies bounded transient/rate-limit retries and cooperative cancellation. | `ppa analyze visual` |
+| Resumable visual analysis | `ppa.core.visual_workflow`, one registered analyzer, and visual repository | No analyzer dependency on provider | Yes | Yes | Required by the selected preview source | Yes, temporarily | Exact analyzer/configuration claims, incremental atomic completion, explicit retry/refresh, cancellation state, and non-reclaimed running work support safe resumption. | `ppa analyze visual` |
+| Report aggregation and rendering | report-specific aggregation models and `ppa.reports` | No | Yes through application repository reads | No | No | No | Read-only and deterministic; no analyzer invocation, source construction, retry state, or persisted mutation occurs. | all `ppa report` commands |
+
+Only source discovery, enumeration, metadata enrichment, and bounded preview acquisition
+know provider behavior. Normalization, persistence contracts, analyzers, aggregate report
+models, and renderers remain source-agnostic. Metadata-only workflows never open a
+preview. Preview resources exist only inside the source-owned context used by visual
+analysis, and image content never crosses the SQLite boundary.
+
+`ppa import` composes the first five stages as inspection, transactional persistence, and
+incremental EXIF enrichment. Enrichment starts only after persistence succeeds. A partial
+enrichment run leaves successful assets committed and the database usable. `ppa analyze
+visual` begins from an already persisted normalized portfolio, claims exact work before
+preview access, and stores only the derived result snapshot after preview cleanup. Report
+commands load persisted normalized or visual evidence and are strictly read-only.
 
 ## Current Implementation
 
