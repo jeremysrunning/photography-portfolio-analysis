@@ -13,6 +13,7 @@ from ppa.models import (
     Gallery,
     MediaType,
     Portfolio,
+    RationalValue,
     SourceReference,
 )
 from ppa.sources import (
@@ -293,6 +294,11 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
                     "Lens": "",
                     "FocalLength": "105/2 mm",
                     "FocalLength35mm": "78.75 mm",
+                    "Aperture": "2.8",
+                    "Exposure": "1/250",
+                    "ISO": 400,
+                    "ExposureCompensation": "+1/3",
+                    "Flash": "On, Fired",
                 }
             },
         },
@@ -337,9 +343,55 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
         "Model": "Camera A",
         "FocalLength": "105/2 mm",
         "FocalLength35mm": "78.75 mm",
+        "Aperture": "2.8",
+        "Exposure": "1/250",
+        "ISO": 400,
+        "ExposureCompensation": "+1/3",
+        "Flash": "On, Fired",
     }
     assert enriched.metadata.focal_length_mm == 52.5
     assert enriched.metadata.focal_length_35mm == 78.75
+    assert enriched.metadata.aperture_f_number == 2.8
+    assert enriched.metadata.exposure_time == RationalValue(1, 250)
+    assert enriched.metadata.iso == 400
+    assert enriched.metadata.exposure_compensation_ev == RationalValue(1, 3)
+    assert enriched.metadata.flash_fired is True
+
+
+def test_smugmug_mapping_uses_only_confirmed_tags_and_observed_formats() -> None:
+    class AliasClient:
+        def get_response(self, uri):
+            return {
+                "ImageMetadata": {
+                    "Uri": uri,
+                    "FNumber": "2.8",
+                    "ExposureTime": "1/250",
+                    "ISOSpeedRatings": 400,
+                    "aperture": "4",
+                    "exposure": "1/100",
+                    "iso": 800,
+                }
+            }
+
+    asset = Asset(
+        SourceReference("image-1", "https://example.smugmug.com/image-1"),
+        AssetMetadata(MediaType.PHOTOGRAPH),
+    )
+    enriched = SmugMugSource(
+        "https://example.smugmug.com", "secret", AliasClient()
+    ).enrich_asset_metadata(asset)
+
+    assert enriched.metadata.aperture_f_number is None
+    assert enriched.metadata.exposure_time is None
+    assert enriched.metadata.iso is None
+    assert set(enriched.exif) == {
+        "FNumber",
+        "ExposureTime",
+        "ISOSpeedRatings",
+        "aperture",
+        "exposure",
+        "iso",
+    }
 
 
 def test_partial_enrichment_preserves_existing_typed_focal_lengths() -> None:
@@ -360,9 +412,19 @@ def test_partial_enrichment_preserves_existing_typed_focal_lengths() -> None:
             exif={
                 "FocalLength": "70.0 mm",
                 "FocalLength35mm": "98.0 mm",
+                "Aperture": "2.8",
+                "Exposure": "1/200",
+                "ISO": 800,
+                "ExposureCompensation": "-1/3",
+                "Flash": "No Flash",
             },
             focal_length_mm=70.0,
             focal_length_35mm=98.0,
+            aperture_f_number=2.8,
+            exposure_time=RationalValue(1, 200),
+            iso=800,
+            exposure_compensation_ev=RationalValue(-1, 3),
+            flash_fired=False,
         ),
     )
     source = SmugMugSource(
@@ -376,10 +438,20 @@ def test_partial_enrichment_preserves_existing_typed_focal_lengths() -> None:
     assert enriched.exif == {
         "FocalLength": "70.0 mm",
         "FocalLength35mm": "98.0 mm",
+        "Aperture": "2.8",
+        "Exposure": "1/200",
+        "ISO": 800,
+        "ExposureCompensation": "-1/3",
+        "Flash": "No Flash",
         "Model": "Camera B",
     }
     assert enriched.metadata.focal_length_mm == 70.0
     assert enriched.metadata.focal_length_35mm == 98.0
+    assert enriched.metadata.aperture_f_number == 2.8
+    assert enriched.metadata.exposure_time == RationalValue(1, 200)
+    assert enriched.metadata.iso == 800
+    assert enriched.metadata.exposure_compensation_ev == RationalValue(-1, 3)
+    assert enriched.metadata.flash_fired is False
 
 
 def test_smugmug_client_retries_transient_and_rate_limited_requests(caplog) -> None:

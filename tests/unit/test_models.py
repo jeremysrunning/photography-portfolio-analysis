@@ -10,8 +10,14 @@ from ppa.models import (
     GalleryPlacement,
     MediaType,
     Portfolio,
+    RationalValue,
     SourceReference,
+    normalize_aperture_f_number,
+    normalize_exposure_compensation,
+    normalize_exposure_time,
+    normalize_flash_fired,
     normalize_focal_length,
+    normalize_iso,
 )
 
 
@@ -201,6 +207,129 @@ def test_focal_length_fields_require_positive_finite_values(field: str) -> None:
 
 def test_reported_teleconverter_adjusted_focal_length_is_not_reinterpreted() -> None:
     assert normalize_focal_length("700/10 mm") == 70.0
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (2.8, 2.8),
+        (" 2.8 ", 2.8),
+        ("f/2.8", 2.8),
+        ("14/5", 2.8),
+        (0, None),
+        (-2.8, None),
+        ("f/unknown", None),
+        (float("inf"), None),
+        (True, None),
+    ],
+)
+def test_aperture_normalization(value: object, expected: float | None) -> None:
+    assert normalize_aperture_f_number(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (1, RationalValue(1)),
+        (0.5, RationalValue(1, 2)),
+        ("1/250", RationalValue(1, 250)),
+        (" 0.5 seconds ", RationalValue(1, 2)),
+        ("120 sec", RationalValue(120)),
+        ("2/4 s", RationalValue(1, 2)),
+        (0, None),
+        (-1, None),
+        ("1/0", None),
+        ("1/2/3", None),
+        (float("nan"), None),
+    ],
+)
+def test_exposure_time_normalization(value: object, expected: RationalValue | None) -> None:
+    assert normalize_exposure_time(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (400, 400),
+        (400.0, 400),
+        ("400", 400),
+        ("400.0", 400),
+        ("400.5", None),
+        ("100, 200", None),
+        ("Auto", None),
+        (0, None),
+        (-100, None),
+        (float("inf"), None),
+        (True, None),
+    ],
+)
+def test_iso_normalization(value: object, expected: int | None) -> None:
+    assert normalize_iso(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("+1/3", RationalValue(1, 3)),
+        ("+2/3 EV", RationalValue(2, 3)),
+        ("-1/3", RationalValue(-1, 3)),
+        ("-0.3 ev", RationalValue(-3, 10)),
+        (0, RationalValue(0)),
+        ("", None),
+        ("unknown", None),
+        (float("nan"), None),
+    ],
+)
+def test_exposure_compensation_normalization(value: object, expected: RationalValue | None) -> None:
+    assert normalize_exposure_compensation(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("On, Fired", True),
+        (" off, DID NOT FIRE ", False),
+        ("No Flash", False),
+        ("On, did not fire", None),
+        ("", None),
+        (0, None),
+        (False, None),
+        (None, None),
+    ],
+)
+def test_flash_fired_normalization(value: object, expected: bool | None) -> None:
+    assert normalize_flash_fired(value) is expected
+
+
+def test_rational_value_is_canonical_exact_and_immutable() -> None:
+    value = RationalValue(-2, -6)
+
+    assert value == RationalValue(1, 3)
+    assert value.numerator == 1
+    assert value.denominator == 3
+    with pytest.raises(AttributeError):
+        value.numerator = 2
+
+
+def test_asset_metadata_validates_exposure_field_semantics() -> None:
+    metadata = AssetMetadata(
+        MediaType.PHOTOGRAPH,
+        aperture_f_number=2.8,
+        exposure_time=RationalValue(1, 250),
+        iso=400,
+        exposure_compensation_ev=RationalValue(-1, 3),
+        flash_fired=False,
+    )
+
+    assert metadata.exposure_time == RationalValue(1, 250)
+    assert metadata.exposure_compensation_ev == RationalValue(-1, 3)
+    assert metadata.flash_fired is False
+    with pytest.raises(ValueError, match="exposure_time"):
+        AssetMetadata(exposure_time=RationalValue(-1, 250))
+    with pytest.raises(ValueError, match="iso"):
+        AssetMetadata(iso=0)
+    with pytest.raises(ValueError, match="flash_fired"):
+        AssetMetadata(flash_fired=1)
 
 
 @pytest.mark.parametrize("confidence", [-0.01, 1.01])

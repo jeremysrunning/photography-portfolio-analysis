@@ -4,7 +4,9 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from enum import StrEnum
+from fractions import Fraction
 from math import isfinite
 from types import MappingProxyType
 from urllib.parse import urlsplit
@@ -26,6 +28,160 @@ _FOCAL_LENGTH = re.compile(
     r"\s*(?:mm)?\s*$",
     re.IGNORECASE,
 )
+_NUMBER_COMPONENT = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)"
+_RATIONAL_VALUE = re.compile(
+    rf"^\s*(?P<numerator>{_NUMBER_COMPONENT})"
+    rf"(?:\s*/\s*(?P<denominator>{_NUMBER_COMPONENT}))?\s*$"
+)
+_APERTURE = re.compile(r"^\s*(?:f\s*/\s*)?(?P<value>.+?)\s*$", re.IGNORECASE)
+_EXPOSURE_TIME = re.compile(
+    r"^\s*(?P<value>.+?)\s*(?:s|sec|second|seconds)?\s*$",
+    re.IGNORECASE,
+)
+_EXPOSURE_COMPENSATION = re.compile(
+    r"^\s*(?P<value>.+?)\s*(?:ev)?\s*$",
+    re.IGNORECASE,
+)
+_INTEGER_TEXT = re.compile(rf"^\s*(?P<value>{_NUMBER_COMPONENT})\s*$")
+_MAX_NUMERIC_TEXT_LENGTH = 128
+_MAX_INTEGER = 2**63 - 1
+
+
+@dataclass(frozen=True, slots=True)
+class RationalValue:
+    """One exact reduced rational value with a positive denominator."""
+
+    numerator: int
+    denominator: int = 1
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.numerator, bool)
+            or not isinstance(self.numerator, int)
+            or isinstance(self.denominator, bool)
+            or not isinstance(self.denominator, int)
+        ):
+            raise ValueError("rational components must be integers")
+        if self.denominator == 0:
+            raise ValueError("rational denominator must not be zero")
+        value = Fraction(self.numerator, self.denominator)
+        if abs(value.numerator) > _MAX_INTEGER or value.denominator > _MAX_INTEGER:
+            raise ValueError("rational components exceed the supported integer range")
+        object.__setattr__(self, "numerator", value.numerator)
+        object.__setattr__(self, "denominator", value.denominator)
+
+    def __float__(self) -> float:
+        return self.numerator / self.denominator
+
+
+def _rational(value: object) -> RationalValue | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        try:
+            return RationalValue(value)
+        except ValueError:
+            return None
+    if isinstance(value, float):
+        if not isfinite(value):
+            return None
+        value = str(value)
+    if not isinstance(value, str) or len(value) > _MAX_NUMERIC_TEXT_LENGTH:
+        return None
+    match = _RATIONAL_VALUE.fullmatch(value)
+    if match is None:
+        return None
+    try:
+        numerator = Fraction(Decimal(match.group("numerator")))
+        denominator_text = match.group("denominator")
+        result = numerator
+        if denominator_text is not None:
+            denominator = Fraction(Decimal(denominator_text))
+            if denominator == 0:
+                return None
+            result /= denominator
+        return RationalValue(result.numerator, result.denominator)
+    except (InvalidOperation, ValueError, ZeroDivisionError):
+        return None
+
+
+def normalize_aperture_f_number(value: object) -> float | None:
+    """Return a positive finite f-number from an explicitly recorded value."""
+    if isinstance(value, str):
+        if len(value) > _MAX_NUMERIC_TEXT_LENGTH:
+            return None
+        match = _APERTURE.fullmatch(value)
+        if match is None:
+            return None
+        value = match.group("value")
+    rational = _rational(value)
+    if rational is None or rational.numerator <= 0:
+        return None
+    result = float(rational)
+    return result if isfinite(result) and result > 0 else None
+
+
+def normalize_exposure_time(value: object) -> RationalValue | None:
+    """Return an exact positive exposure time in seconds."""
+    if isinstance(value, str):
+        if len(value) > _MAX_NUMERIC_TEXT_LENGTH:
+            return None
+        match = _EXPOSURE_TIME.fullmatch(value)
+        if match is None:
+            return None
+        value = match.group("value")
+    result = _rational(value)
+    return result if result is not None and result.numerator > 0 else None
+
+
+def normalize_iso(value: object) -> int | None:
+    """Return a positive integral ISO value when explicitly recorded."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        result = value
+    else:
+        if isinstance(value, float):
+            if not isfinite(value):
+                return None
+            value = str(value)
+        if not isinstance(value, str) or len(value) > _MAX_NUMERIC_TEXT_LENGTH:
+            return None
+        match = _INTEGER_TEXT.fullmatch(value)
+        if match is None:
+            return None
+        try:
+            decimal = Decimal(match.group("value"))
+        except InvalidOperation:
+            return None
+        if not decimal.is_finite() or decimal != decimal.to_integral_value():
+            return None
+        result = int(decimal)
+    return result if 0 < result <= _MAX_INTEGER else None
+
+
+def normalize_exposure_compensation(value: object) -> RationalValue | None:
+    """Return an exact signed exposure-compensation value in EV."""
+    if isinstance(value, str):
+        if len(value) > _MAX_NUMERIC_TEXT_LENGTH:
+            return None
+        match = _EXPOSURE_COMPENSATION.fullmatch(value)
+        if match is None:
+            return None
+        value = match.group("value")
+    return _rational(value)
+
+
+def normalize_flash_fired(value: object) -> bool | None:
+    """Return whether confirmed descriptive source evidence says flash fired."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().casefold()
+    if normalized == "on, fired":
+        return True
+    if normalized in {"off, did not fire", "no flash"}:
+        return False
+    return None
 
 
 def normalize_focal_length(value: object) -> float | None:
@@ -123,6 +279,11 @@ class AssetMetadata:
     exif: Mapping[str, JsonValue] = field(default_factory=dict)
     focal_length_mm: float | None = None
     focal_length_35mm: float | None = None
+    aperture_f_number: float | None = None
+    exposure_time: RationalValue | None = None
+    iso: int | None = None
+    exposure_compensation_ev: RationalValue | None = None
+    flash_fired: bool | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_type, MediaType):
@@ -140,6 +301,31 @@ class AssetMetadata:
                 raise ValueError(f"{name} must be a positive finite number or None")
             if value is not None:
                 object.__setattr__(self, name, float(value))
+        if self.aperture_f_number is not None and (
+            isinstance(self.aperture_f_number, bool)
+            or not isinstance(self.aperture_f_number, int | float)
+            or not isfinite(float(self.aperture_f_number))
+            or self.aperture_f_number <= 0
+        ):
+            raise ValueError("aperture_f_number must be a positive finite number or None")
+        if self.aperture_f_number is not None:
+            object.__setattr__(self, "aperture_f_number", float(self.aperture_f_number))
+        if self.exposure_time is not None and (
+            not isinstance(self.exposure_time, RationalValue) or self.exposure_time.numerator <= 0
+        ):
+            raise ValueError("exposure_time must be a positive RationalValue or None")
+        if self.iso is not None and (
+            isinstance(self.iso, bool)
+            or not isinstance(self.iso, int)
+            or not 0 < self.iso <= _MAX_INTEGER
+        ):
+            raise ValueError("iso must be a positive integer or None")
+        if self.exposure_compensation_ev is not None and not isinstance(
+            self.exposure_compensation_ev, RationalValue
+        ):
+            raise ValueError("exposure_compensation_ev must be a RationalValue or None")
+        if self.flash_fired is not None and not isinstance(self.flash_fired, bool):
+            raise ValueError("flash_fired must be a boolean or None")
         object.__setattr__(self, "values", _freeze_mapping(self.values))
         object.__setattr__(self, "exif", _freeze_mapping(self.exif))
 

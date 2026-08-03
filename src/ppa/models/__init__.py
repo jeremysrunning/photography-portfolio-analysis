@@ -11,8 +11,14 @@ from ppa.models.portfolio import (
     MediaType,
     Observation,
     Portfolio,
+    RationalValue,
     SourceReference,
+    normalize_aperture_f_number,
+    normalize_exposure_compensation,
+    normalize_exposure_time,
+    normalize_flash_fired,
     normalize_focal_length,
+    normalize_iso,
 )
 
 __all__ = [
@@ -26,6 +32,12 @@ __all__ = [
     "MediaType",
     "Observation",
     "Portfolio",
+    "RationalValue",
     "SourceReference",
+    "normalize_aperture_f_number",
+    "normalize_exposure_compensation",
+    "normalize_exposure_time",
+    "normalize_flash_fired",
     "normalize_focal_length",
+    "normalize_iso",
 ]

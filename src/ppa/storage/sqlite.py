@@ -19,8 +19,14 @@ from ppa.models import (
     MediaType,
     Observation,
     Portfolio,
+    RationalValue,
     SourceReference,
+    normalize_aperture_f_number,
+    normalize_exposure_compensation,
+    normalize_exposure_time,
+    normalize_flash_fired,
     normalize_focal_length,
+    normalize_iso,
 )
 from ppa.storage.base import EnrichmentStatus, EnrichmentTarget, VisualAnalysisRecord
 from ppa.visual import (
@@ -32,7 +38,7 @@ from ppa.visual import (
     VisualRunStatus,
 )
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 _SCHEMA_STATEMENTS = (
     """
@@ -83,7 +89,31 @@ _SCHEMA_STATEMENTS = (
         exif_json TEXT NOT NULL,
         focal_length_mm REAL,
         focal_length_35mm REAL,
+        aperture_f_number REAL CHECK (
+            aperture_f_number IS NULL OR aperture_f_number > 0
+        ),
+        exposure_time_numerator INTEGER CHECK (
+            exposure_time_numerator IS NULL OR exposure_time_numerator > 0
+        ),
+        exposure_time_denominator INTEGER CHECK (
+            exposure_time_denominator IS NULL OR exposure_time_denominator > 0
+        ),
+        iso INTEGER CHECK (iso IS NULL OR iso > 0),
+        exposure_compensation_numerator INTEGER,
+        exposure_compensation_denominator INTEGER CHECK (
+            exposure_compensation_denominator IS NULL
+            OR exposure_compensation_denominator > 0
+        ),
+        flash_fired INTEGER CHECK (flash_fired IS NULL OR flash_fired IN (0, 1)),
         measurements_json TEXT NOT NULL,
+        CHECK (
+            (exposure_time_numerator IS NULL) =
+            (exposure_time_denominator IS NULL)
+        ),
+        CHECK (
+            (exposure_compensation_numerator IS NULL) =
+            (exposure_compensation_denominator IS NULL)
+        ),
         PRIMARY KEY (source, portfolio_source_id, source_id),
         FOREIGN KEY (source, portfolio_source_id)
             REFERENCES portfolios(source, source_id) ON DELETE CASCADE
@@ -289,6 +319,9 @@ class SQLitePortfolioRepository:
         if current_version == 5:
             self._migrate_v5_to_v6(connection)
             current_version = 6
+        if current_version == 6:
+            self._migrate_v6_to_v7(connection)
+            current_version = 7
         if current_version != SCHEMA_VERSION:
             raise UnsupportedSchemaVersionError(
                 f"Unsupported SQLite schema version {current_version}; "
@@ -444,7 +477,8 @@ class SQLitePortfolioRepository:
             parameters.append(limit)
         rows = self._connect().execute(
             f"""
-            SELECT assets.source_id, assets.media_type, assets.metadata_json
+            SELECT assets.source_id, assets.media_type,
+                   assets.metadata_json, assets.exif_json
             FROM assets
             LEFT JOIN asset_enrichments AS enrichment
               ON enrichment.source = assets.source
@@ -464,6 +498,7 @@ class SQLitePortfolioRepository:
                 row["source_id"],
                 MediaType(row["media_type"]),
                 json.loads(row["metadata_json"]),
+                json.loads(row["exif_json"]),
             )
             for row in rows
         )
@@ -478,6 +513,11 @@ class SQLitePortfolioRepository:
         *,
         focal_length_mm: float | None = None,
         focal_length_35mm: float | None = None,
+        aperture_f_number: float | None = None,
+        exposure_time: RationalValue | None = None,
+        iso: int | None = None,
+        exposure_compensation_ev: RationalValue | None = None,
+        flash_fired: bool | None = None,
     ) -> None:
         if kind != "exif":
             raise ValueError(f"unsupported enrichment kind: {kind}")
@@ -488,13 +528,27 @@ class SQLitePortfolioRepository:
                 UPDATE assets
                 SET exif_json = ?,
                     focal_length_mm = ?,
-                    focal_length_35mm = ?
+                    focal_length_35mm = ?,
+                    aperture_f_number = ?,
+                    exposure_time_numerator = ?,
+                    exposure_time_denominator = ?,
+                    iso = ?,
+                    exposure_compensation_numerator = ?,
+                    exposure_compensation_denominator = ?,
+                    flash_fired = ?
                 WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
                 """,
                 (
                     _json(values),
                     focal_length_mm,
                     focal_length_35mm,
+                    aperture_f_number,
+                    exposure_time.numerator if exposure_time else None,
+                    exposure_time.denominator if exposure_time else None,
+                    iso,
+                    (exposure_compensation_ev.numerator if exposure_compensation_ev else None),
+                    (exposure_compensation_ev.denominator if exposure_compensation_ev else None),
+                    int(flash_fired) if flash_fired is not None else None,
                     source,
                     portfolio_source_id,
                     asset_source_id,
@@ -1062,8 +1116,12 @@ class SQLitePortfolioRepository:
             INSERT INTO assets (
                 source, portfolio_source_id, source_id, source_url, preview_url,
                 captured_at, media_type, metadata_json, exif_json,
-                focal_length_mm, focal_length_35mm, measurements_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                focal_length_mm, focal_length_35mm, aperture_f_number,
+                exposure_time_numerator, exposure_time_denominator, iso,
+                exposure_compensation_numerator,
+                exposure_compensation_denominator, flash_fired,
+                measurements_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (source, portfolio_source_id, source_id) DO UPDATE SET
                 source_url = excluded.source_url,
                 preview_url = excluded.preview_url,
@@ -1082,6 +1140,36 @@ class SQLitePortfolioRepository:
                     WHEN excluded.exif_json = '{}' THEN assets.focal_length_35mm
                     ELSE excluded.focal_length_35mm
                 END,
+                aperture_f_number = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.aperture_f_number
+                    ELSE excluded.aperture_f_number
+                END,
+                exposure_time_numerator = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.exposure_time_numerator
+                    ELSE excluded.exposure_time_numerator
+                END,
+                exposure_time_denominator = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.exposure_time_denominator
+                    ELSE excluded.exposure_time_denominator
+                END,
+                iso = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.iso
+                    ELSE excluded.iso
+                END,
+                exposure_compensation_numerator = CASE
+                    WHEN excluded.exif_json = '{}'
+                    THEN assets.exposure_compensation_numerator
+                    ELSE excluded.exposure_compensation_numerator
+                END,
+                exposure_compensation_denominator = CASE
+                    WHEN excluded.exif_json = '{}'
+                    THEN assets.exposure_compensation_denominator
+                    ELSE excluded.exposure_compensation_denominator
+                END,
+                flash_fired = CASE
+                    WHEN excluded.exif_json = '{}' THEN assets.flash_fired
+                    ELSE excluded.flash_fired
+                END,
                 measurements_json = CASE
                     WHEN excluded.measurements_json = '[]' THEN assets.measurements_json
                     ELSE excluded.measurements_json
@@ -1098,6 +1186,29 @@ class SQLitePortfolioRepository:
                 _json(asset.exif),
                 asset.metadata.focal_length_mm,
                 asset.metadata.focal_length_35mm,
+                asset.metadata.aperture_f_number,
+                (asset.metadata.exposure_time.numerator if asset.metadata.exposure_time else None),
+                (
+                    asset.metadata.exposure_time.denominator
+                    if asset.metadata.exposure_time
+                    else None
+                ),
+                asset.metadata.iso,
+                (
+                    asset.metadata.exposure_compensation_ev.numerator
+                    if asset.metadata.exposure_compensation_ev
+                    else None
+                ),
+                (
+                    asset.metadata.exposure_compensation_ev.denominator
+                    if asset.metadata.exposure_compensation_ev
+                    else None
+                ),
+                (
+                    int(asset.metadata.flash_fired)
+                    if asset.metadata.flash_fired is not None
+                    else None
+                ),
                 _json(
                     [
                         {
@@ -1207,6 +1318,25 @@ class SQLitePortfolioRepository:
                 exif=json.loads(row["exif_json"]),
                 focal_length_mm=row["focal_length_mm"],
                 focal_length_35mm=row["focal_length_35mm"],
+                aperture_f_number=row["aperture_f_number"],
+                exposure_time=(
+                    RationalValue(
+                        row["exposure_time_numerator"],
+                        row["exposure_time_denominator"],
+                    )
+                    if row["exposure_time_numerator"] is not None
+                    else None
+                ),
+                iso=row["iso"],
+                exposure_compensation_ev=(
+                    RationalValue(
+                        row["exposure_compensation_numerator"],
+                        row["exposure_compensation_denominator"],
+                    )
+                    if row["exposure_compensation_numerator"] is not None
+                    else None
+                ),
+                flash_fired=(bool(row["flash_fired"]) if row["flash_fired"] is not None else None),
             ),
             measurements=tuple(
                 Measurement(
@@ -1316,6 +1446,8 @@ class SQLitePortfolioRepository:
             connection.execute("DROP TABLE asset_enrichments_v2")
             connection.execute("DROP TABLE assets_v2")
             self._backfill_media_types(connection)
+            self._backfill_focal_lengths(connection)
+            self._backfill_exposure_metadata(connection)
             connection.execute(
                 "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
                 (str(SCHEMA_VERSION),),
@@ -1343,28 +1475,7 @@ class SQLitePortfolioRepository:
                 connection.execute("ALTER TABLE assets ADD COLUMN focal_length_mm REAL")
             if "focal_length_35mm" not in columns:
                 connection.execute("ALTER TABLE assets ADD COLUMN focal_length_35mm REAL")
-            rows = connection.execute(
-                """
-                SELECT source, portfolio_source_id, source_id, exif_json
-                FROM assets
-                """
-            ).fetchall()
-            for row in rows:
-                exif = json.loads(row["exif_json"])
-                connection.execute(
-                    """
-                    UPDATE assets
-                    SET focal_length_mm = ?, focal_length_35mm = ?
-                    WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
-                    """,
-                    (
-                        normalize_focal_length(exif.get("FocalLength")),
-                        normalize_focal_length(exif.get("FocalLength35mm")),
-                        row["source"],
-                        row["portfolio_source_id"],
-                        row["source_id"],
-                    ),
-                )
+            SQLitePortfolioRepository._backfill_focal_lengths(connection)
             connection.execute(
                 "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
                 ("5",),
@@ -1377,6 +1488,124 @@ class SQLitePortfolioRepository:
             connection.execute(
                 "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
                 ("6",),
+            )
+
+    @staticmethod
+    def _migrate_v6_to_v7(connection: sqlite3.Connection) -> None:
+        with connection:
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(assets)").fetchall()
+            }
+            additions = {
+                "aperture_f_number": (
+                    "REAL CHECK (aperture_f_number IS NULL OR aperture_f_number > 0)"
+                ),
+                "exposure_time_numerator": (
+                    "INTEGER CHECK (exposure_time_numerator IS NULL OR exposure_time_numerator > 0)"
+                ),
+                "exposure_time_denominator": (
+                    "INTEGER CHECK (exposure_time_denominator IS NULL "
+                    "OR exposure_time_denominator > 0)"
+                ),
+                "iso": "INTEGER CHECK (iso IS NULL OR iso > 0)",
+                "exposure_compensation_numerator": "INTEGER",
+                "exposure_compensation_denominator": (
+                    "INTEGER CHECK (exposure_compensation_denominator IS NULL "
+                    "OR exposure_compensation_denominator > 0)"
+                ),
+                "flash_fired": ("INTEGER CHECK (flash_fired IS NULL OR flash_fired IN (0, 1))"),
+            }
+            for name, definition in additions.items():
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE assets ADD COLUMN {name} {definition}")
+            SQLitePortfolioRepository._backfill_exposure_metadata(connection)
+            connection.execute(
+                "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
+                ("7",),
+            )
+
+    @staticmethod
+    def _backfill_focal_lengths(connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            """
+            SELECT source, portfolio_source_id, source_id, exif_json,
+                   focal_length_mm, focal_length_35mm
+            FROM assets
+            """
+        ).fetchall()
+        for row in rows:
+            exif = json.loads(row["exif_json"])
+            connection.execute(
+                """
+                UPDATE assets
+                SET focal_length_mm = ?, focal_length_35mm = ?
+                WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
+                """,
+                (
+                    row["focal_length_mm"]
+                    if row["focal_length_mm"] is not None
+                    else normalize_focal_length(exif.get("FocalLength")),
+                    row["focal_length_35mm"]
+                    if row["focal_length_35mm"] is not None
+                    else normalize_focal_length(exif.get("FocalLength35mm")),
+                    row["source"],
+                    row["portfolio_source_id"],
+                    row["source_id"],
+                ),
+            )
+
+    @staticmethod
+    def _backfill_exposure_metadata(connection: sqlite3.Connection) -> None:
+        rows = connection.execute(
+            """
+            SELECT source, portfolio_source_id, source_id, exif_json,
+                   aperture_f_number, exposure_time_numerator,
+                   exposure_time_denominator, iso,
+                   exposure_compensation_numerator,
+                   exposure_compensation_denominator, flash_fired
+            FROM assets
+            """
+        ).fetchall()
+        for row in rows:
+            if row["source"] != "smugmug":
+                continue
+            exif = json.loads(row["exif_json"])
+            exposure = _existing_rational(
+                row["exposure_time_numerator"],
+                row["exposure_time_denominator"],
+            ) or normalize_exposure_time(exif.get("Exposure"))
+            compensation = _existing_rational(
+                row["exposure_compensation_numerator"],
+                row["exposure_compensation_denominator"],
+            ) or normalize_exposure_compensation(exif.get("ExposureCompensation"))
+            connection.execute(
+                """
+                UPDATE assets
+                SET aperture_f_number = ?,
+                    exposure_time_numerator = ?,
+                    exposure_time_denominator = ?,
+                    iso = ?,
+                    exposure_compensation_numerator = ?,
+                    exposure_compensation_denominator = ?,
+                    flash_fired = ?
+                WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
+                """,
+                (
+                    row["aperture_f_number"]
+                    if row["aperture_f_number"] is not None
+                    else normalize_aperture_f_number(exif.get("Aperture")),
+                    exposure.numerator if exposure else None,
+                    exposure.denominator if exposure else None,
+                    row["iso"] if row["iso"] is not None else normalize_iso(exif.get("ISO")),
+                    compensation.numerator if compensation else None,
+                    compensation.denominator if compensation else None,
+                    row["flash_fired"]
+                    if row["flash_fired"] is not None
+                    else _optional_bool(normalize_flash_fired(exif.get("Flash"))),
+                    row["source"],
+                    row["portfolio_source_id"],
+                    row["source_id"],
+                ),
             )
 
     @staticmethod
@@ -1413,6 +1642,16 @@ def _timestamp(value: datetime | None) -> str:
 
 def _read_timestamp(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value) if value is not None else None
+
+
+def _optional_bool(value: bool | None) -> int | None:
+    return int(value) if value is not None else None
+
+
+def _existing_rational(numerator: int | None, denominator: int | None) -> RationalValue | None:
+    if numerator is None or denominator is None:
+        return None
+    return RationalValue(numerator, denominator)
 
 
 def _mutable_json(value: Any) -> Any:

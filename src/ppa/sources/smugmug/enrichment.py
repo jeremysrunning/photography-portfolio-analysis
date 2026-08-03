@@ -4,7 +4,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from ppa.models import JsonValue, MediaType, normalize_focal_length
+from ppa.models import (
+    JsonValue,
+    MediaType,
+    normalize_aperture_f_number,
+    normalize_exposure_compensation,
+    normalize_exposure_time,
+    normalize_flash_fired,
+    normalize_focal_length,
+    normalize_iso,
+)
 from ppa.sources import SourceError, SourceRateLimitError
 from ppa.sources.smugmug.api import SmugMugApiClient
 from ppa.storage import EnrichmentTarget, PortfolioRepository
@@ -94,14 +103,14 @@ class SmugMugExifEnricher:
                         )
                         failed += 1
                         continue
+                    merged_exif = {**target.exif, **metadata}
                     self.repository.save_asset_enrichment(
                         source,
                         portfolio_source_id,
                         target.source_id,
                         "exif",
-                        metadata,
-                        focal_length_mm=normalize_focal_length(metadata.get("FocalLength")),
-                        focal_length_35mm=normalize_focal_length(metadata.get("FocalLength35mm")),
+                        merged_exif,
+                        **normalized_typed_metadata(merged_exif),
                     )
                     completed += 1
             if progress:
@@ -138,6 +147,21 @@ class SmugMugExifEnricher:
             if source_id is not None:
                 results[source_id] = _normalized_metadata(metadata)
         return results
+
+
+def normalized_typed_metadata(exif: dict[str, JsonValue]) -> dict[str, object]:
+    """Map confirmed SmugMug metadata tags to source-agnostic typed values."""
+    return {
+        "focal_length_mm": normalize_focal_length(exif.get("FocalLength")),
+        "focal_length_35mm": normalize_focal_length(exif.get("FocalLength35mm")),
+        "aperture_f_number": normalize_aperture_f_number(exif.get("Aperture")),
+        "exposure_time": normalize_exposure_time(exif.get("Exposure")),
+        "iso": normalize_iso(exif.get("ISO")),
+        "exposure_compensation_ev": normalize_exposure_compensation(
+            exif.get("ExposureCompensation")
+        ),
+        "flash_fired": normalize_flash_fired(exif.get("Flash")),
+    }
 
 
 def _metadata_source_id(metadata: dict[str, Any]) -> str | None:
