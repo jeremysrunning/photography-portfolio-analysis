@@ -34,10 +34,10 @@ production gates. Research code must remain isolated until that approval exists.
 
 ## Downstream dependencies
 
-- Issue #39 is fully independent and uses deterministic saliency measurements only. It
+- Issue #39 completed independently and uses deterministic saliency measurements only. It
   consumes no people, face, object, or semantic-subject detections. Any future people-aware
   enhancement requires a separate issue after Issue #38 is unblocked.
-- Issues #40 and #41 do not assume Issue #38 completion.
-- Issue #42 can report available visual-analysis families, but its people-presence and
-  subject-placement sections require persisted production results from Issue #38 and must
-  be omitted until those results exist.
+- Issue #41 completed independently with deterministic preview-structure measurements.
+- Issue #42 completed independently. Its visual-habits report presents people/face
+  analysis as unavailable until persisted production results from Issue #38 exist.
+- Issue #40 remains independently blocked by its own model-governance requirements.

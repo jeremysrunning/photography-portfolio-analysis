@@ -28,12 +28,25 @@ Completed:
 - bounded production preview lifecycle
 - resumable visual-analysis persistence and orchestration
 - deterministic color and luminance visual analysis
+- deterministic composition and saliency visual analysis
+- deterministic preview-structure visual analysis
+- deterministic visual-habits reporting over persisted production measurements
 - bounded NanoDet/YuNet calibration research and replacement-detector documentary research
 
 Next:
 
-- add further focused temporal analyzers
-- validate independently scoped visual analyzers that do not require people detection
+- Issue #13: normalize and persist typed exposure metadata
+- Issue #8: measure explicit EXIF missingness after typed exposure metadata is available
+- Issue #12: normalize source-reported dimensions, then build the orientation and
+  aspect-ratio habits report
+- Issue #14: extend equipment reporting with explicit aliases and deterministic segments
+- Issue #16: compose and render the existing report models as unified Markdown
+- Issue #17: render that approved composition as self-contained accessible HTML
+
+Deferred:
+
+- Issue #20 photographer self-assessment remains deferred until Issues #13, #12, and #16
+  provide a concrete, evidence-aware comparison consumer.
 
 Blocked:
 
@@ -42,8 +55,13 @@ Blocked:
   production gates, and Issue #51 found no replacement candidate that cleared documentary
   licensing and project requirements. Resume only after a newly approved candidate passes
   licensing, provenance, reproducibility, packaging, privacy, and blind technical gates.
-- Issue #42 may report existing visual families independently, but its people-presence and
-  subject-placement sections depend on completed Issue #38 measurements.
+- Issue #40 scene and environment classification has no approved model artifact. The
+  reviewed candidates stopped at the model-weight license gate; no later governance or
+  technical gate has been evaluated.
+
+Issues #39, #41, and #42 completed independently of the blocked semantic analyzers. The
+visual-habits report explicitly presents people/face and scene/environment families as
+unavailable rather than inferring negative classifications.
 
 ### Goals
 
