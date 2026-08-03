@@ -15,6 +15,7 @@ from ppa.models import (
     MediaType,
     Observation,
     Portfolio,
+    RationalValue,
     SourceReference,
 )
 from ppa.storage import SQLitePortfolioRepository, UnsupportedSchemaVersionError
@@ -48,6 +49,11 @@ def _portfolio() -> Portfolio:
             {"Make": "Example", "Model": "Camera A", "Lens": "Lens A"},
             focal_length_mm=35.5,
             focal_length_35mm=52.5,
+            aperture_f_number=2.8,
+            exposure_time=RationalValue(1, 250),
+            iso=400,
+            exposure_compensation_ev=RationalValue(-1, 3),
+            flash_fired=False,
         ),
         preview_url="https://example.test/previews/1.jpg",
         measurements=(Measurement("aspect_ratio", 1.5, method="metadata"),),
@@ -198,6 +204,8 @@ def test_schema_creation_version_foreign_keys_and_empty_portfolio(tmp_path) -> N
     assert version == str(SCHEMA_VERSION)
     assert asset_columns["captured_at"][3] == 0
     assert asset_columns["media_type"][3] == 1
+    assert asset_columns["exposure_time_numerator"][2] == "INTEGER"
+    assert asset_columns["exposure_compensation_denominator"][2] == "INTEGER"
     assert len(foreign_keys) == 6
 
 
@@ -218,6 +226,9 @@ def test_round_trip_preserves_semantic_graph_missing_values_and_updates(tmp_path
     assert loaded.assets[0].captured_at is not None
     assert loaded.assets[0].captured_at.utcoffset() == timedelta(hours=-8)
     assert loaded.assets[1].media_type is MediaType.NON_PHOTO
+    assert loaded.assets[0].metadata.exposure_time == RationalValue(1, 250)
+    assert loaded.assets[0].metadata.exposure_compensation_ev == RationalValue(-1, 3)
+    assert loaded.assets[0].metadata.flash_fired is False
     with pytest.raises(TypeError):
         loaded.assets[0].values["Caption"] = "Changed after load"
     with pytest.raises(TypeError):
@@ -284,6 +295,53 @@ def test_version_four_database_backfills_focal_lengths_from_exif(tmp_path) -> No
     assert migrated is not None
     assert migrated.assets[0].metadata.focal_length_mm == 35.5
     assert migrated.assets[0].metadata.focal_length_35mm == 53.25
+
+
+def test_version_six_database_adds_and_backfills_exposure_columns(tmp_path) -> None:
+    database = tmp_path / "version-six.sqlite3"
+    with sqlite3.connect(database) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE schema_metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO schema_metadata VALUES ('version', '6');
+            CREATE TABLE assets (
+                source TEXT NOT NULL,
+                portfolio_source_id TEXT NOT NULL,
+                source_id TEXT NOT NULL,
+                exif_json TEXT NOT NULL
+            );
+            """
+        )
+        connection.execute(
+            "INSERT INTO assets VALUES (?, ?, ?, ?)",
+            (
+                "smugmug",
+                "portfolio",
+                "asset",
+                '{"Aperture":"2.8","Exposure":"2/500","ISO":400,'
+                '"ExposureCompensation":"+2/3","Flash":"No Flash"}',
+            ),
+        )
+
+    with SQLitePortfolioRepository(database) as repository:
+        repository.initialize()
+
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        version = connection.execute(
+            "SELECT value FROM schema_metadata WHERE key = 'version'"
+        ).fetchone()[0]
+        row = connection.execute("SELECT * FROM assets").fetchone()
+
+    assert version == "7"
+    assert row["aperture_f_number"] == 2.8
+    assert (row["exposure_time_numerator"], row["exposure_time_denominator"]) == (1, 250)
+    assert row["iso"] == 400
+    assert (
+        row["exposure_compensation_numerator"],
+        row["exposure_compensation_denominator"],
+    ) == (2, 3)
+    assert row["flash_fired"] == 0
 
 
 def test_transaction_rolls_back_and_foreign_keys_are_enforced(tmp_path) -> None:

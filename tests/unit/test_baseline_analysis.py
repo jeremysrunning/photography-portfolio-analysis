@@ -10,6 +10,7 @@ from ppa.models import (
     GalleryPlacement,
     MediaType,
     Portfolio,
+    RationalValue,
     SourceReference,
 )
 from ppa.reports import render_baseline
@@ -37,6 +38,11 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
             },
             focal_length_mm=35.0,
             focal_length_35mm=52.5,
+            aperture_f_number=2.8,
+            exposure_time=RationalValue(1, 250),
+            iso=400,
+            exposure_compensation_ev=RationalValue(1, 3),
+            flash_fired=False,
         ),
     )
     portrait = Asset(
@@ -92,9 +98,20 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
     assert report.geolocation_coverage.available == 1
     assert report.focal_length_coverage.available == 1
     assert report.focal_length_35mm_coverage.available == 1
+    assert report.aperture_coverage == report.focal_length_coverage
+    assert report.exposure_time_coverage.available == 1
+    assert report.iso_coverage.available == 1
+    assert report.exposure_compensation_coverage.available == 1
+    assert report.flash_evidence_coverage.available == 1
+    assert report.flash_fired == 0
+    assert report.flash_not_fired == 1
+    assert report.flash_missing_or_ambiguous == 1
     rendered = render_baseline(report)
     assert "Focal length: 1 / 2 (50.0%)" in rendered
     assert "35 mm equivalent: 1 / 2 (50.0%)" in rendered
+    assert "Flash evidence: 1 / 2 (50.0%)" in rendered
+    assert "Did not fire: 1" in rendered
+    assert "Missing or ambiguous: 1" in rendered
     assert "Missing metadata is reported as missing" in rendered
 
 

@@ -14,7 +14,6 @@ from ppa.models import (
     MediaType,
     Portfolio,
     SourceReference,
-    normalize_focal_length,
 )
 from ppa.sources.base import (
     CancellationCheck,
@@ -22,6 +21,7 @@ from ppa.sources.base import (
 )
 from ppa.sources.preview import PreviewRequest, PreviewResource
 from ppa.sources.smugmug.api import SmugMugApiClient
+from ppa.sources.smugmug.enrichment import normalized_typed_metadata
 from ppa.sources.smugmug.preview import SmugMugPreviewService
 
 logger = logging.getLogger(__name__)
@@ -115,8 +115,7 @@ class SmugMugSource:
             metadata=replace(
                 asset.metadata,
                 exif=merged_exif,
-                focal_length_mm=normalize_focal_length(merged_exif.get("FocalLength")),
-                focal_length_35mm=normalize_focal_length(merged_exif.get("FocalLength35mm")),
+                **normalized_typed_metadata(merged_exif),
             ),
         )
 

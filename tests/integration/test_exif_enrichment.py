@@ -1,3 +1,7 @@
+import sqlite3
+
+import pytest
+
 from ppa.models import (
     Asset,
     AssetMetadata,
@@ -5,6 +9,7 @@ from ppa.models import (
     GalleryPlacement,
     MediaType,
     Portfolio,
+    RationalValue,
     SourceReference,
 )
 from ppa.sources import SourceRateLimitError
@@ -28,6 +33,10 @@ class FakeClient:
                     "ISO": 400,
                     "FocalLength": "35 mm",
                     "FocalLength35mm": "52.5 mm",
+                    "Aperture": "2.8",
+                    "Exposure": "1/250",
+                    "ExposureCompensation": "+2/3",
+                    "Flash": "Off, Did not fire",
                 },
                 {
                     "Uri": "/api/v2/image/photo-2!metadata",
@@ -90,6 +99,11 @@ def test_exif_enrichment_is_incremental_and_skips_stored_video(tmp_path) -> None
     assert enriched.assets[0].exif["Model"] == "Camera A"
     assert enriched.assets[0].metadata.focal_length_mm == 35.0
     assert enriched.assets[0].metadata.focal_length_35mm == 52.5
+    assert enriched.assets[0].metadata.aperture_f_number == 2.8
+    assert enriched.assets[0].metadata.exposure_time == RationalValue(1, 250)
+    assert enriched.assets[0].metadata.iso == 400
+    assert enriched.assets[0].metadata.exposure_compensation_ev == RationalValue(2, 3)
+    assert enriched.assets[0].metadata.flash_fired is False
     assert enriched.assets[1].metadata.focal_length_mm is None
     assert enriched.assets[1].metadata.focal_length_35mm is None
     assert enriched.assets[1].exif["Model"] == "Camera B"
@@ -145,3 +159,86 @@ def test_rate_limit_leaves_targets_pending(tmp_path) -> None:
 
     assert status.pending == 1
     assert status.failed == 0
+
+
+def test_partial_retry_merges_raw_exif_and_preserves_unrelated_typed_fields(tmp_path) -> None:
+    class PartialClient:
+        def get_response(self, uri):
+            return {
+                "ImageMetadata": {
+                    "Uri": "/api/v2/image/photo-1!metadata",
+                    "Model": "Updated Camera",
+                    "Exposure": "malformed",
+                }
+            }
+
+    database = tmp_path / "portfolio.sqlite3"
+    asset = Asset(
+        SourceReference("photo-1", "https://example.smugmug.com/i-photo-1"),
+        AssetMetadata(
+            MediaType.PHOTOGRAPH,
+            exif={
+                "Aperture": "2.8",
+                "Exposure": "1/250",
+                "ISO": 400,
+                "ExposureCompensation": "-1/3",
+                "Flash": "On, Fired",
+            },
+            aperture_f_number=2.8,
+            exposure_time=RationalValue(1, 250),
+            iso=400,
+            exposure_compensation_ev=RationalValue(-1, 3),
+            flash_fired=True,
+        ),
+    )
+    with SQLitePortfolioRepository(database) as repository:
+        repository.save(_portfolio(asset))
+        repository.fail_asset_enrichment("smugmug", "example", "photo-1", "exif", "temporary")
+        targets = repository.list_enrichment_targets(
+            "smugmug", "example", "exif", retry_failed=True
+        )
+        SmugMugExifEnricher(PartialClient(), repository).enrich("smugmug", "example", targets)
+        stored = repository.get("smugmug", "example")
+
+    assert stored is not None
+    metadata = stored.asset("photo-1").metadata
+    assert stored.asset("photo-1").exif["Exposure"] == "malformed"
+    assert stored.asset("photo-1").exif["Model"] == "Updated Camera"
+    assert metadata.exposure_time is None
+    assert metadata.aperture_f_number == 2.8
+    assert metadata.iso == 400
+    assert metadata.exposure_compensation_ev == RationalValue(-1, 3)
+    assert metadata.flash_fired is True
+
+
+def test_exposure_enrichment_and_completion_roll_back_atomically(tmp_path) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    portfolio = _portfolio(_asset("photo-1"))
+
+    with SQLitePortfolioRepository(database) as repository:
+        repository.save(portfolio)
+        connection = repository._connect()
+        connection.execute(
+            """
+            CREATE TRIGGER reject_exposure_update
+            BEFORE UPDATE OF aperture_f_number ON assets
+            BEGIN SELECT RAISE(ABORT, 'forced exposure rollback'); END
+            """
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="forced exposure rollback"):
+            repository.save_asset_enrichment(
+                "smugmug",
+                "example",
+                "photo-1",
+                "exif",
+                {"Aperture": "2.8"},
+                aperture_f_number=2.8,
+            )
+        stored = repository.get("smugmug", "example")
+        status = repository.enrichment_status("smugmug", "example", "exif")
+
+    assert stored is not None
+    assert stored.asset("photo-1").exif == {}
+    assert stored.asset("photo-1").metadata.aperture_f_number is None
+    assert status.pending == 1
+    assert status.completed == 0

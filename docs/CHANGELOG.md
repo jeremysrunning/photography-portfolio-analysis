@@ -10,6 +10,10 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- Typed aperture, exact rational exposure time, positive integer ISO, exact rational
+  exposure compensation, and tri-state flash evidence with confirmed SmugMug mappings,
+  additive SQLite schema version 7 migration/backfill, baseline coverage, and typed
+  equipment-report consumption.
 - A deterministic `ppa report visual-habits` command that aggregates only persisted
   `color-luminance`, `composition-saliency`, and `preview-structure` results with exact
   identity selection, explicit run/snapshot/catalog coverage, conditional denominators,

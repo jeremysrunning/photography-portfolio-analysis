@@ -1,14 +1,12 @@
 """Source-agnostic equipment and exposure metadata analysis."""
 
-import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from fractions import Fraction
 
-from ppa.analysis.assets import asset_value, camera_name, text_value, unique_photographs
+from ppa.analysis.assets import camera_name, text_value, unique_photographs
 from ppa.analysis.baseline import Coverage
-from ppa.models import Asset, Portfolio
-
-_NUMBER = re.compile(r"[-+]?\d+(?:\.\d+)?")
+from ppa.models import Portfolio, RationalValue
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,9 +55,9 @@ def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
     lenses: Counter[str] = Counter()
     focal_lengths: Counter[str] = Counter()
     focal_ranges: Counter[str] = Counter()
-    apertures: Counter[str] = Counter()
-    exposures: Counter[str] = Counter()
-    iso_values: Counter[str] = Counter()
+    apertures: Counter[float] = Counter()
+    exposures: Counter[RationalValue] = Counter()
+    iso_values: Counter[int] = Counter()
     iso_ranges: Counter[str] = Counter()
     cameras_by_year: dict[int, Counter[str]] = defaultdict(Counter)
 
@@ -79,17 +77,17 @@ def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
             focal_lengths[_measurement(focal, "mm")] += 1
             focal_ranges[_focal_range(focal)] += 1
 
-        aperture = _number(asset, "Aperture", "FNumber", "aperture")
+        aperture = asset.metadata.aperture_f_number
         if aperture is not None:
-            apertures[f"f/{_compact(aperture)}"] += 1
+            apertures[aperture] += 1
 
-        exposure = text_value(asset, "Exposure", "ExposureTime", "exposure")
-        if exposure:
+        exposure = asset.metadata.exposure_time
+        if exposure is not None:
             exposures[exposure] += 1
 
-        iso = _number(asset, "ISO", "ISOSpeedRatings", "iso")
+        iso = asset.metadata.iso
         if iso is not None:
-            iso_values[_compact(iso)] += 1
+            iso_values[iso] += 1
             iso_ranges[_iso_range(iso)] += 1
 
     yearly = tuple(
@@ -108,25 +106,29 @@ def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
         lenses=dict(lenses.most_common(10)),
         focal_lengths=dict(focal_lengths.most_common(10)),
         focal_length_ranges=_ordered_ranges(focal_ranges, _focal_range_order()),
-        apertures=dict(apertures.most_common(10)),
-        exposures=dict(exposures.most_common(10)),
-        iso_values=dict(iso_values.most_common(10)),
+        apertures={
+            f"f/{_compact(value)}": count
+            for value, count in sorted(apertures.items(), key=lambda item: (-item[1], item[0]))[:10]
+        },
+        exposures={
+            _exposure_label(value): count
+            for value, count in sorted(
+                exposures.items(),
+                key=lambda item: (
+                    -item[1],
+                    Fraction(item[0].numerator, item[0].denominator),
+                ),
+            )[:10]
+        },
+        iso_values={
+            str(value): count
+            for value, count in sorted(iso_values.items(), key=lambda item: (-item[1], item[0]))[
+                :10
+            ]
+        },
         iso_ranges=_ordered_ranges(iso_ranges, _iso_range_order()),
         yearly_cameras=yearly,
     )
-
-
-def _number(asset: Asset, *names: str) -> float | None:
-    value = asset_value(asset, *names)
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int | float):
-        return float(value)
-    if isinstance(value, str):
-        match = _NUMBER.search(value)
-        if match:
-            return float(match.group())
-    return None
 
 
 def _measurement(value: float, unit: str) -> str:
@@ -135,6 +137,12 @@ def _measurement(value: float, unit: str) -> str:
 
 def _compact(value: float) -> str:
     return f"{value:g}"
+
+
+def _exposure_label(value: RationalValue) -> str:
+    if value.denominator == 1:
+        return f"{value.numerator} s"
+    return f"{value.numerator}/{value.denominator} s"
 
 
 def _focal_range(value: float) -> str:
@@ -153,7 +161,7 @@ def _focal_range_order() -> tuple[str, ...]:
     return ("<24 mm", "24-34 mm", "35-69 mm", "70-134 mm", ">=135 mm")
 
 
-def _iso_range(value: float) -> str:
+def _iso_range(value: int) -> str:
     if value <= 100:
         return "<=100"
     if value <= 400:

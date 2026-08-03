@@ -152,8 +152,8 @@ Media assets have an explicit `photograph`, `non_photo`, or `unknown` type. Unkn
 is not treated as photography, and SmugMug video records remain represented without being
 included in photographic analysis.
 
-The database carries an explicit schema version. This release creates version 6 and
-migrates version-2 through version-5 databases in place; unsupported versions fail with a
+The database carries an explicit schema version. This release creates version 7 and
+migrates version-2 through version-6 databases in place; unsupported versions fail with a
 clear error rather than being overwritten. SQLite foreign keys and transactions protect
 relationships and roll back an incomplete save.
 
@@ -307,6 +307,16 @@ normalized into typed millimeter fields from SmugMug's confirmed `FocalLength` a
 Missing or malformed values remain missing, and no crop factor, effective focal length,
 or underlying lens is inferred.
 
+SmugMug's confirmed `Aperture`, `Exposure`, `ISO`, `ExposureCompensation`, and `Flash`
+metadata is also normalized into typed fields. Exposure time is stored as exact positive
+rational seconds, and exposure compensation as exact signed rational EV, preserving
+recorded thirds. Missing, blank, malformed, unsupported, and ambiguous values remain
+missing while the original raw EXIF is retained.
+
+Flash evidence is tri-state. False means only that the recorded metadata says flash did
+not fire; it does not distinguish whether flash was disabled, unavailable, absent,
+suppressed, or unused for another reason.
+
 Useful controls:
 
 ```console
@@ -397,7 +407,9 @@ combined without duplicating sections.
 The baseline distinguishes gallery placements from unique image identities and reports
 gallery-size distribution, capture range, orientation, file-format distribution, geotag
 coverage, and camera, lens, native focal-length, and 35 mm-equivalent focal-length metadata
-coverage. Non-photo media already present in a dataset is disclosed and excluded. Missing
+coverage. It also reports typed aperture, exposure-time, ISO, exposure-compensation, and
+flash-evidence coverage, with fired, did-not-fire, and missing-or-ambiguous flash counts.
+Non-photo media already present in a dataset is disclosed and excluded. Missing
 metadata is measured rather than interpreted.
 
 The database contains metadata, source references, and derived data only. The current

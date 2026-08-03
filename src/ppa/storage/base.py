@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from ppa.models import Asset, JsonValue, MediaType, Portfolio
+from ppa.models import Asset, JsonValue, MediaType, Portfolio, RationalValue
 from ppa.visual import AnalyzerIdentity, VisualAnalysisSnapshot, VisualResult
 
 
@@ -15,6 +15,7 @@ class EnrichmentTarget:
     source_id: str
     media_type: MediaType
     metadata: dict[str, JsonValue]
+    exif: dict[str, JsonValue]
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,11 @@ class PortfolioRepository(Protocol):
         *,
         focal_length_mm: float | None = None,
         focal_length_35mm: float | None = None,
+        aperture_f_number: float | None = None,
+        exposure_time: RationalValue | None = None,
+        iso: int | None = None,
+        exposure_compensation_ev: RationalValue | None = None,
+        flash_fired: bool | None = None,
     ) -> None:
         """Save derived source metadata and mark the enrichment complete."""
         ...
