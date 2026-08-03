@@ -261,6 +261,8 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
                         "WebUri": "https://example.smugmug.com/People/i-image-1",
                         "Title": "A portrait",
                         "IsVideo": False,
+                        "OriginalWidth": 6000,
+                        "OriginalHeight": 4000,
                         "DateTimeOriginal": "2024-01-02T03:04:05+00:00",
                     }
                 ],
@@ -275,6 +277,8 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
                         "Uri": "/api/v2/album/album-1/image/image-2",
                         "WebUri": "/People/i-image-2",
                         "IsVideo": False,
+                        "Width": 3000,
+                        "Height": 2000,
                     },
                     {
                         "Uri": "/api/v2/album/album-1/image/video-1",
@@ -323,6 +327,11 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
         "video-1",
     ]
     assert portfolio.assets[0].preview_url is None
+    assert portfolio.assets[0].metadata.width_px == 6000
+    assert portfolio.assets[0].metadata.height_px == 4000
+    assert portfolio.assets[0].values["OriginalWidth"] == 6000
+    assert portfolio.assets[1].metadata.width_px is None
+    assert portfolio.assets[1].metadata.height_px is None
     assert portfolio.assets[2].media_type is MediaType.NON_PHOTO
     assert "smugmug_gallery_discovery_completed" in caplog.messages
     completed = next(
@@ -356,6 +365,8 @@ def test_smugmug_source_discovers_nested_and_empty_galleries(caplog) -> None:
     assert enriched.metadata.iso == 400
     assert enriched.metadata.exposure_compensation_ev == RationalValue(1, 3)
     assert enriched.metadata.flash_fired is True
+    assert enriched.metadata.width_px == 6000
+    assert enriched.metadata.height_px == 4000
 
 
 def test_smugmug_mapping_uses_only_confirmed_tags_and_observed_formats() -> None:

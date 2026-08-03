@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
@@ -18,7 +19,28 @@ from ppa.models import (
     normalize_flash_fired,
     normalize_focal_length,
     normalize_iso,
+    normalize_pixel_dimension,
 )
+
+
+@pytest.mark.parametrize("value", [1, 4000, " 4000 ", Decimal("4000")])
+def test_pixel_dimension_accepts_only_exact_positive_integral_forms(value) -> None:
+    assert normalize_pixel_dimension(value) == int(value)
+
+
+def test_asset_metadata_canonicalizes_exact_decimal_dimensions_to_integers() -> None:
+    metadata = AssetMetadata(width_px=Decimal("6000"), height_px=Decimal("4000"))  # type: ignore[arg-type]
+    assert metadata.width_px == 6000
+    assert metadata.height_px == 4000
+    assert isinstance(metadata.width_px, int)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [True, False, 0, -1, 4000.0, "4000.0", "4e3", "4000 px", "", "bad", 2**63],
+)
+def test_pixel_dimension_rejects_unsupported_forms(value) -> None:
+    assert normalize_pixel_dimension(value) is None
 
 
 def _reference(source_id: str) -> SourceReference:

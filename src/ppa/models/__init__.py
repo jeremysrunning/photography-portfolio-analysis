@@ -19,6 +19,7 @@ from ppa.models.portfolio import (
     normalize_flash_fired,
     normalize_focal_length,
     normalize_iso,
+    normalize_pixel_dimension,
 )
 
 __all__ = [
@@ -40,4 +41,5 @@ __all__ = [
     "normalize_flash_fired",
     "normalize_focal_length",
     "normalize_iso",
+    "normalize_pixel_dimension",
 ]

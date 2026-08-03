@@ -45,6 +45,7 @@ _EXPOSURE_COMPENSATION = re.compile(
 _INTEGER_TEXT = re.compile(rf"^\s*(?P<value>{_NUMBER_COMPONENT})\s*$")
 _MAX_NUMERIC_TEXT_LENGTH = 128
 _MAX_INTEGER = 2**63 - 1
+_PIXEL_DIMENSION = re.compile(r"^[0-9]+$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,6 +209,28 @@ def normalize_focal_length(value: object) -> float | None:
     return result if isfinite(result) and result > 0 else None
 
 
+def normalize_pixel_dimension(value: object) -> int | None:
+    """Return a positive integral pixel dimension from recorded source evidence."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, Decimal):
+        if not value.is_finite() or value != value.to_integral_value():
+            return None
+        result = int(value)
+    elif isinstance(value, str):
+        stripped = value.strip()
+        if not stripped or len(stripped) > _MAX_NUMERIC_TEXT_LENGTH:
+            return None
+        if _PIXEL_DIMENSION.fullmatch(stripped) is None:
+            return None
+        result = int(stripped)
+    else:
+        return None
+    return result if 0 < result <= _MAX_INTEGER else None
+
+
 def _freeze_json(value: JsonValue) -> JsonValue:
     if isinstance(value, Mapping):
         return MappingProxyType({key: _freeze_json(item) for key, item in value.items()})
@@ -284,6 +307,8 @@ class AssetMetadata:
     iso: int | None = None
     exposure_compensation_ev: RationalValue | None = None
     flash_fired: bool | None = None
+    width_px: int | None = None
+    height_px: int | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.media_type, MediaType):
@@ -326,6 +351,13 @@ class AssetMetadata:
             raise ValueError("exposure_compensation_ev must be a RationalValue or None")
         if self.flash_fired is not None and not isinstance(self.flash_fired, bool):
             raise ValueError("flash_fired must be a boolean or None")
+        for name in ("width_px", "height_px"):
+            value = getattr(self, name)
+            if value is not None:
+                normalized = normalize_pixel_dimension(value)
+                if normalized is None:
+                    raise ValueError(f"{name} must be a positive SQLite-range integer or None")
+                object.__setattr__(self, name, normalized)
         object.__setattr__(self, "values", _freeze_mapping(self.values))
         object.__setattr__(self, "exif", _freeze_mapping(self.exif))
 
