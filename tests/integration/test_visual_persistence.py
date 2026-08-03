@@ -167,6 +167,36 @@ def test_versions_and_configurations_coexist_without_overwrite(tmp_path) -> None
     ] == [0, 1, 2]
 
 
+def test_bulk_visual_reads_use_normalized_assets_and_include_implicit_pending(tmp_path) -> None:
+    second = Asset(
+        SourceReference("asset-2", "https://example.test/asset-2"),
+        AssetMetadata(MediaType.PHOTOGRAPH),
+    )
+    portfolio = Portfolio(
+        "test",
+        SourceReference("portfolio-1", "https://example.test/portfolio-1"),
+        "Portfolio",
+        assets=(*_portfolio().assets, second),
+    )
+    repository = SQLitePortfolioRepository(tmp_path / "portfolio.sqlite3")
+    repository.save(portfolio)
+    historical = AnalyzerIdentity("visual-color", "0.9.0", "defaults-v0")
+    for identity in (IDENTITY, historical):
+        assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", identity, at=T0)
+        repository.complete_visual_analysis(
+            "test", "portfolio-1", "asset-1", identity, (_result(),), at=T0
+        )
+
+    assert repository.list_visual_analysis_identities(portfolio) == (historical, IDENTITY)
+    records = repository.list_visual_analysis_records(portfolio, IDENTITY)
+    assert tuple(record.asset for record in records) == portfolio.assets
+    assert records[0].snapshot.state.status is VisualRunStatus.COMPLETED
+    assert records[0].snapshot.results[0].value == 0.4
+    assert records[1].snapshot.state.status is VisualRunStatus.PENDING
+    assert records[1].snapshot.state.attempts == 0
+    assert records[1].snapshot.results == ()
+
+
 def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_path) -> None:
     repository = _repository(tmp_path / "portfolio.sqlite3")
     assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)

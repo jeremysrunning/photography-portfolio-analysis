@@ -22,7 +22,7 @@ from ppa.models import (
     SourceReference,
     normalize_focal_length,
 )
-from ppa.storage.base import EnrichmentStatus, EnrichmentTarget
+from ppa.storage.base import EnrichmentStatus, EnrichmentTarget, VisualAnalysisRecord
 from ppa.visual import (
     AnalyzerIdentity,
     VisualAnalysisSnapshot,
@@ -606,6 +606,92 @@ class SQLitePortfolioRepository:
             self._read_visual_state(row),
             tuple(self._read_visual_result(item) for item in result_rows),
         )
+
+    def list_visual_analysis_identities(
+        self,
+        portfolio: Portfolio,
+    ) -> tuple[AnalyzerIdentity, ...]:
+        """List exact persisted identities for one normalized portfolio."""
+        self.initialize()
+        rows = (
+            self._connect()
+            .execute(
+                """
+            SELECT DISTINCT analyzer_name, analyzer_version, configuration_version
+            FROM visual_analysis_runs
+            WHERE source = ? AND portfolio_source_id = ?
+            ORDER BY analyzer_name, analyzer_version, configuration_version
+            """,
+                (portfolio.source_name, portfolio.source_id),
+            )
+            .fetchall()
+        )
+        return tuple(
+            AnalyzerIdentity(
+                row["analyzer_name"],
+                row["analyzer_version"],
+                row["configuration_version"],
+            )
+            for row in rows
+        )
+
+    def list_visual_analysis_records(
+        self,
+        portfolio: Portfolio,
+        identity: AnalyzerIdentity,
+    ) -> tuple[VisualAnalysisRecord, ...]:
+        """Bulk-read one exact identity without exposing persistence identifiers."""
+        self.initialize()
+        connection = self._connect()
+        if not self.exists(portfolio.source_name, portfolio.source_id):
+            raise KeyError(f"portfolio not found: {portfolio.source_name}/{portfolio.source_id}")
+        key = (
+            portfolio.source_name,
+            portfolio.source_id,
+            identity.name,
+            identity.version,
+            identity.configuration_version,
+        )
+        run_rows = connection.execute(
+            """
+            SELECT * FROM visual_analysis_runs
+            WHERE source = ? AND portfolio_source_id = ?
+              AND analyzer_name = ? AND analyzer_version = ?
+              AND configuration_version = ?
+            """,
+            key,
+        ).fetchall()
+        result_rows = connection.execute(
+            """
+            SELECT * FROM visual_analysis_results
+            WHERE source = ? AND portfolio_source_id = ?
+              AND analyzer_name = ? AND analyzer_version = ?
+              AND configuration_version = ?
+            ORDER BY asset_source_id, result_name
+            """,
+            key,
+        ).fetchall()
+        runs = {row["asset_source_id"]: row for row in run_rows}
+        results: dict[str, list[VisualResult]] = {}
+        for row in result_rows:
+            results.setdefault(row["asset_source_id"], []).append(self._read_visual_result(row))
+        records = []
+        for asset in portfolio.assets:
+            row = runs.get(asset.source_id)
+            snapshot = (
+                VisualAnalysisSnapshot(
+                    identity,
+                    self._read_visual_state(row),
+                    tuple(results.get(asset.source_id, ())),
+                )
+                if row is not None
+                else VisualAnalysisSnapshot(
+                    identity,
+                    VisualRunState(VisualRunStatus.PENDING, 0, None),
+                )
+            )
+            records.append(VisualAnalysisRecord(asset, snapshot))
+        return tuple(records)
 
     def claim_visual_analysis(
         self,

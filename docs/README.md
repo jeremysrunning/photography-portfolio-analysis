@@ -64,9 +64,10 @@ This project is in its early foundation phase. It currently provides:
 - a small command-line interface
 
 Metadata analyzers, reports, visual-analysis persistence and orchestration, and the
-`color-luminance` visual analyzer are implemented. People and face detection is not a
-production capability: Issue #38 remains blocked after Issues #49 and #51 found no
-detector strategy that satisfies the approved evidence and distribution requirements.
+`color-luminance`, `composition-saliency`, and `preview-structure` visual analyzers are
+implemented. People and face detection is not a production capability: Issue #38 remains
+blocked after Issues #49 and #51 found no detector strategy that satisfies the approved
+evidence and distribution requirements.
 The NanoDet and YuNet implementations under `research/` are calibration evidence only;
 they are not registered production analyzers.
 
@@ -232,6 +233,42 @@ preview structure only. They do not establish original-file sharpness, focus acc
 depth of field, motion, lens behavior, sensor noise, scene content, intent, or quality.
 The proposed texture-density measurement was rejected by generated preview-size validation
 and is not part of the production catalog.
+
+Generate the deterministic portfolio visual-habits report from persisted results:
+
+```console
+ppa report visual-habits portfolio.sqlite3
+```
+
+The report selects the exact identities currently registered for `color-luminance`,
+`composition-saliency`, and `preview-structure`. It never falls back to or combines older
+analyzer/configuration versions. Current attempt states and retained last-successful
+snapshots are disclosed separately, and every measurement uses its documented conditional
+denominator. Missing, failed, skipped, pending, running, weak-evidence, and unsupported
+results are not converted to false or zero.
+
+The concise report includes evidence and coverage, composition and saliency, color and
+luminance, preview structure, conservative adjacent-year median differences, and methods
+and limitations. Request independent optional sections with:
+
+```console
+ppa report visual-habits portfolio.sqlite3 --details
+ppa report visual-habits portfolio.sqlite3 --gallery-breakdown
+ppa report visual-habits portfolio.sqlite3 --year-breakdown
+ppa report visual-habits portfolio.sqlite3 --camera-breakdown
+ppa report visual-habits portfolio.sqlite3 --lens-breakdown
+ppa report visual-habits portfolio.sqlite3 --orientation-breakdown
+```
+
+`--details` expands measurement evidence and provenance without enabling segmentation.
+Flags can be combined without duplicate headings. Gallery, year, camera, lens, and
+orientation measurements require at least 20 usable photographs; galleries also require
+at least 50% successful-snapshot coverage for the selected identity.
+
+Reporting reads SQLite and normalized metadata only. It requires no SmugMug key, fetches
+no preview, invokes no analyzer or model, and does not modify visual-analysis state.
+People/face and scene/environment findings remain unavailable while Issues #38 and #40
+are blocked and are not presented as negative classifications.
 
 Completed work is skipped unless `--refresh` is supplied. `--retry-failed` includes durable
 failures and cancellation-interrupted pending work; `--only-failed` includes only durable

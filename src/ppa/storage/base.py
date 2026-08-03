@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-from ppa.models import JsonValue, MediaType, Portfolio
+from ppa.models import Asset, JsonValue, MediaType, Portfolio
 from ppa.visual import AnalyzerIdentity, VisualAnalysisSnapshot, VisualResult
 
 
@@ -24,6 +24,14 @@ class EnrichmentStatus:
     pending: int
     completed: int
     failed: int
+
+
+@dataclass(frozen=True, slots=True)
+class VisualAnalysisRecord:
+    """One normalized asset and its exact-identity visual snapshot."""
+
+    asset: Asset
+    snapshot: VisualAnalysisSnapshot
 
 
 @runtime_checkable
@@ -104,6 +112,21 @@ class PortfolioRepository(Protocol):
 @runtime_checkable
 class VisualAnalysisRepository(Protocol):
     """Persist source-agnostic visual results and per-asset attempt state."""
+
+    def list_visual_analysis_identities(
+        self,
+        portfolio: Portfolio,
+    ) -> tuple[AnalyzerIdentity, ...]:
+        """List exact persisted identities for one normalized portfolio."""
+        ...
+
+    def list_visual_analysis_records(
+        self,
+        portfolio: Portfolio,
+        identity: AnalyzerIdentity,
+    ) -> tuple[VisualAnalysisRecord, ...]:
+        """Bulk-read one exact identity in normalized portfolio asset order."""
+        ...
 
     def visual_analysis_snapshot(
         self,

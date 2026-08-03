@@ -29,12 +29,19 @@ from ppa.analysis.visual import (
     list_visual_analyzers,
     register_visual_analyzer,
 )
+from ppa.analysis.visual_habits import (
+    PRODUCTION_IDENTITIES,
+    VisualAnalyzerDataset,
+    VisualHabitsReport,
+    analyze_visual_habits,
+)
 
 register_visual_analyzer(ColorLuminanceAnalyzer())
 register_visual_analyzer(CompositionSaliencyAnalyzer())
 register_visual_analyzer(PreviewStructureAnalyzer())
 
 __all__ = [
+    "PRODUCTION_IDENTITIES",
     "BaselineReport",
     "CameraEra",
     "CaptureGap",
@@ -52,6 +59,8 @@ __all__ = [
     "TimelineReport",
     "TimelineSegment",
     "VisualAnalyzer",
+    "VisualAnalyzerDataset",
+    "VisualHabitsReport",
     "YearChange",
     "YearlyCamera",
     "allows_empty_results",
@@ -59,6 +68,7 @@ __all__ = [
     "analyze_equipment",
     "analyze_focal_lengths",
     "analyze_timeline",
+    "analyze_visual_habits",
     "get_visual_analyzer",
     "list_visual_analyzers",
     "register_visual_analyzer",

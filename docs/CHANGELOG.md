@@ -10,6 +10,12 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- A deterministic `ppa report visual-habits` command that aggregates only persisted
+  `color-luminance`, `composition-saliency`, and `preview-structure` results with exact
+  identity selection, explicit run/snapshot/catalog coverage, conditional denominators,
+  neutral scalar and regional summaries, and optional metadata-segment breakdowns.
+- Read-only repository operations for listing persisted visual identities and bulk-loading
+  one exact identity as normalized assets with their retained successful snapshots.
 - The production `preview-structure` analyzer with deterministic support disclosure,
   normalized Laplacian sharpness, gradient-directional anisotropy, edge density, local
   luminance contrast, spatial sharpness variation, edge-suppressed Haar residual, and

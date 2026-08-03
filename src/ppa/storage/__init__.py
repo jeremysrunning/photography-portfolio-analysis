@@ -4,6 +4,7 @@ from ppa.storage.base import (
     EnrichmentStatus,
     EnrichmentTarget,
     PortfolioRepository,
+    VisualAnalysisRecord,
     VisualAnalysisRepository,
 )
 from ppa.storage.sqlite import SQLitePortfolioRepository, UnsupportedSchemaVersionError
@@ -14,5 +15,6 @@ __all__ = [
     "PortfolioRepository",
     "SQLitePortfolioRepository",
     "UnsupportedSchemaVersionError",
+    "VisualAnalysisRecord",
     "VisualAnalysisRepository",
 ]
