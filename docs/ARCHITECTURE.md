@@ -174,13 +174,15 @@ The ingestion boundary passes complete normalized `Portfolio` models to a source
 repository. SQLite has no knowledge of SmugMug, and analyzers have no knowledge of the
 relational schema.
 
-Schema version 7 stores portfolios, galleries, and unique assets in explicit relational
+Schema version 8 stores portfolios, galleries, and unique assets in explicit relational
 tables. A gallery-placement table records the many-to-many relationship between galleries
 and assets, including stable placement order. Source identifiers and URLs are explicit
 columns, as are media type, optional capture timestamp, and independently normalized native
 and 35 mm-equivalent focal lengths. Aperture and ISO use nullable scalar columns;
 exposure time and exposure compensation use exact reduced numerator/denominator pairs;
-recorded flash-fired evidence uses a nullable boolean column. Flexible normalized
+recorded flash-fired evidence uses a nullable boolean column. Independent nullable
+integer columns store source-reported original width and height; orientation and reduced
+aspect ratio remain derived analysis values. Flexible normalized
 metadata, EXIF, measurements,
 observations, and findings use small JSON columns because their keys are intentionally
 extensible. No table accepts image bytes.

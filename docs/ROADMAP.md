@@ -38,8 +38,8 @@ Completed:
 Next:
 
 - Issue #8: measure explicit EXIF missingness after typed exposure metadata is available
-- Issue #12: normalize source-reported dimensions, then build the orientation and
-  aspect-ratio habits report
+- Issue #12: normalize source-reported dimensions and report recorded orientation and
+  exact aspect ratios
 - Issue #14: extend equipment reporting with explicit aliases and deterministic segments
 - Issue #16: compose and render the existing report models as unified Markdown
 - Issue #17: render that approved composition as self-contained accessible HTML
