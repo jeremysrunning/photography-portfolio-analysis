@@ -152,8 +152,8 @@ Media assets have an explicit `photograph`, `non_photo`, or `unknown` type. Unkn
 is not treated as photography, and SmugMug video records remain represented without being
 included in photographic analysis.
 
-The database carries an explicit schema version. This release creates version 7 and
-migrates version-2 through version-6 databases in place; unsupported versions fail with a
+The database carries an explicit schema version. This release creates version 8 and
+migrates version-2 through version-7 databases in place; unsupported versions fail with a
 clear error rather than being overwritten. SQLite foreign keys and transactions protect
 relationships and roll back an incomplete save.
 
@@ -403,6 +403,24 @@ ppa report timeline portfolio.sqlite3 --gallery-breakdown
 `--details` adds complete yearly, monthly, and recorded-hour distributions. The camera
 and gallery flags add their respective complete per-segment distributions. Flags can be
 combined without duplicating sections.
+
+Generate the recorded orientation and exact aspect-ratio report:
+
+```console
+ppa report orientation portfolio.sqlite3
+```
+
+The report uses independently normalized source-reported original width and height. It
+classifies complete pairs as landscape, portrait, or square and reduces directional
+ratios exactly, so `3:2` and `2:3` remain distinct and nearby crop ratios are not merged.
+The default output shows ten ratios; `--details` shows expanded evidence and at most 50.
+Use `--all-aspect-ratios` for the complete portfolio-wide distribution, which may be
+large. Optional `--year-breakdown`, `--gallery-breakdown`, and `--camera-breakdown` flags
+add qualifying segments independently.
+
+Orientation describes the provider-recorded dimensions. Provider handling of EXIF
+rotation is not independently verified, and the report does not infer intent, quality,
+or recommended cropping.
 
 The baseline distinguishes gallery placements from unique image identities and reports
 gallery-size distribution, capture range, orientation, file-format distribution, geotag

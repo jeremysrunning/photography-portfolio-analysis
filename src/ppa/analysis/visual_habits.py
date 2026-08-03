@@ -10,7 +10,7 @@ from enum import StrEnum
 from math import isfinite
 from statistics import median
 
-from ppa.analysis.assets import asset_value, camera_name, text_value
+from ppa.analysis.assets import camera_name, text_value
 from ppa.analysis.color_luminance import ANALYZER_IDENTITY as COLOR_IDENTITY
 from ppa.analysis.composition_saliency import (
     ANALYZER_IDENTITY as SALIENCY_IDENTITY,
@@ -1061,8 +1061,8 @@ def _metadata_groups(
 
 
 def _orientation(asset: Asset) -> str | None:
-    width = _positive_number(asset, "OriginalWidth", "width", "Width")
-    height = _positive_number(asset, "OriginalHeight", "height", "Height")
+    width = asset.metadata.width_px
+    height = asset.metadata.height_px
     if width is None or height is None:
         return None
     if width > height:
@@ -1070,17 +1070,6 @@ def _orientation(asset: Asset) -> str | None:
     if height > width:
         return "portrait"
     return "square"
-
-
-def _positive_number(asset: Asset, *names: str) -> float | None:
-    value = asset_value(asset, *names)
-    if isinstance(value, bool):
-        return None
-    try:
-        numeric = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    return numeric if isfinite(numeric) and numeric > 0 else None
 
 
 def _identity_key(identity: AnalyzerIdentity) -> tuple[str, str, str]:

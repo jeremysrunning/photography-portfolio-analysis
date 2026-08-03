@@ -27,6 +27,7 @@ from ppa.models import (
     normalize_flash_fired,
     normalize_focal_length,
     normalize_iso,
+    normalize_pixel_dimension,
 )
 from ppa.storage.base import EnrichmentStatus, EnrichmentTarget, VisualAnalysisRecord
 from ppa.visual import (
@@ -38,7 +39,7 @@ from ppa.visual import (
     VisualRunStatus,
 )
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 _SCHEMA_STATEMENTS = (
     """
@@ -105,6 +106,12 @@ _SCHEMA_STATEMENTS = (
             OR exposure_compensation_denominator > 0
         ),
         flash_fired INTEGER CHECK (flash_fired IS NULL OR flash_fired IN (0, 1)),
+        original_width_px INTEGER CHECK (
+            original_width_px IS NULL OR original_width_px > 0
+        ),
+        original_height_px INTEGER CHECK (
+            original_height_px IS NULL OR original_height_px > 0
+        ),
         measurements_json TEXT NOT NULL,
         CHECK (
             (exposure_time_numerator IS NULL) =
@@ -322,6 +329,9 @@ class SQLitePortfolioRepository:
         if current_version == 6:
             self._migrate_v6_to_v7(connection)
             current_version = 7
+        if current_version == 7:
+            self._migrate_v7_to_v8(connection)
+            current_version = 8
         if current_version != SCHEMA_VERSION:
             raise UnsupportedSchemaVersionError(
                 f"Unsupported SQLite schema version {current_version}; "
@@ -1120,8 +1130,8 @@ class SQLitePortfolioRepository:
                 exposure_time_numerator, exposure_time_denominator, iso,
                 exposure_compensation_numerator,
                 exposure_compensation_denominator, flash_fired,
-                measurements_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                original_width_px, original_height_px, measurements_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT (source, portfolio_source_id, source_id) DO UPDATE SET
                 source_url = excluded.source_url,
                 preview_url = excluded.preview_url,
@@ -1170,6 +1180,8 @@ class SQLitePortfolioRepository:
                     WHEN excluded.exif_json = '{}' THEN assets.flash_fired
                     ELSE excluded.flash_fired
                 END,
+                original_width_px = excluded.original_width_px,
+                original_height_px = excluded.original_height_px,
                 measurements_json = CASE
                     WHEN excluded.measurements_json = '[]' THEN assets.measurements_json
                     ELSE excluded.measurements_json
@@ -1209,6 +1221,8 @@ class SQLitePortfolioRepository:
                     if asset.metadata.flash_fired is not None
                     else None
                 ),
+                asset.metadata.width_px,
+                asset.metadata.height_px,
                 _json(
                     [
                         {
@@ -1337,6 +1351,8 @@ class SQLitePortfolioRepository:
                     else None
                 ),
                 flash_fired=(bool(row["flash_fired"]) if row["flash_fired"] is not None else None),
+                width_px=row["original_width_px"],
+                height_px=row["original_height_px"],
             ),
             measurements=tuple(
                 Measurement(
@@ -1522,6 +1538,61 @@ class SQLitePortfolioRepository:
             connection.execute(
                 "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
                 ("7",),
+            )
+
+    @staticmethod
+    def _migrate_v7_to_v8(connection: sqlite3.Connection) -> None:
+        with connection:
+            columns = {
+                row["name"] for row in connection.execute("PRAGMA table_info(assets)").fetchall()
+            }
+            for name in ("original_width_px", "original_height_px"):
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE assets ADD COLUMN {name} INTEGER "
+                        f"CHECK ({name} IS NULL OR {name} > 0)"
+                    )
+            SQLitePortfolioRepository._backfill_dimensions(connection)
+            connection.execute(
+                "UPDATE schema_metadata SET value = ? WHERE key = 'version'",
+                ("8",),
+            )
+
+    @staticmethod
+    def _backfill_dimensions(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"] for row in connection.execute("PRAGMA table_info(assets)").fetchall()
+        }
+        if "metadata_json" not in columns:
+            return
+        rows = connection.execute(
+            """
+            SELECT source, portfolio_source_id, source_id, metadata_json,
+                   original_width_px, original_height_px
+            FROM assets
+            """
+        ).fetchall()
+        for row in rows:
+            if row["source"] != "smugmug":
+                continue
+            values = json.loads(row["metadata_json"])
+            connection.execute(
+                """
+                UPDATE assets
+                SET original_width_px = ?, original_height_px = ?
+                WHERE source = ? AND portfolio_source_id = ? AND source_id = ?
+                """,
+                (
+                    row["original_width_px"]
+                    if row["original_width_px"] is not None
+                    else normalize_pixel_dimension(values.get("OriginalWidth")),
+                    row["original_height_px"]
+                    if row["original_height_px"] is not None
+                    else normalize_pixel_dimension(values.get("OriginalHeight")),
+                    row["source"],
+                    row["portfolio_source_id"],
+                    row["source_id"],
+                ),
             )
 
     @staticmethod

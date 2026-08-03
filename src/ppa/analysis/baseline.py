@@ -92,8 +92,8 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     flash_fired_count = 0
 
     for asset in photographs:
-        width = _positive_number(asset, "OriginalWidth", "width", "Width")
-        height = _positive_number(asset, "OriginalHeight", "height", "Height")
+        width = asset.metadata.width_px
+        height = asset.metadata.height_px
         if width is not None and height is not None:
             dimension_count += 1
             if width > height:
@@ -200,8 +200,3 @@ def _number(asset: Asset, *names: str) -> float | None:
         except ValueError:
             return None
     return None
-
-
-def _positive_number(asset: Asset, *names: str) -> float | None:
-    value = _number(asset, *names)
-    return value if value is not None and value > 0 else None

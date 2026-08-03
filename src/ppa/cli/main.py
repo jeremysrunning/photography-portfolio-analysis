@@ -14,6 +14,7 @@ from ppa.analysis import (
     analyze_baseline,
     analyze_equipment,
     analyze_focal_lengths,
+    analyze_orientation,
     analyze_timeline,
     analyze_visual_habits,
     get_visual_analyzer,
@@ -42,6 +43,7 @@ from ppa.reports import (
     render_baseline,
     render_equipment,
     render_focal_lengths,
+    render_orientation,
     render_timeline,
     render_visual_habits,
 )
@@ -163,6 +165,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include complete per-gallery timeline distributions.",
     )
+    orientation = report_commands.add_parser(
+        "orientation",
+        help="Measure recorded orientation and exact aspect ratios.",
+    )
+    _add_database_selection(orientation)
+    orientation.add_argument("--details", action="store_true")
+    orientation.add_argument(
+        "--all-aspect-ratios",
+        action="store_true",
+        help="Render every exact portfolio-wide ratio; output may be large.",
+    )
+    for option in ("year", "gallery", "camera"):
+        orientation.add_argument(f"--{option}-breakdown", action="store_true")
     visual_habits = report_commands.add_parser(
         "visual-habits",
         help="Aggregate persisted deterministic visual measurements.",
@@ -321,6 +336,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                     details=args.details,
                     camera_breakdown=args.camera_breakdown,
                     gallery_breakdown=args.gallery_breakdown,
+                )
+            )
+            return 0
+        if args.report_command == "orientation":
+            print(
+                render_orientation(
+                    analyze_orientation(portfolio),
+                    details=args.details,
+                    all_aspect_ratios=args.all_aspect_ratios,
+                    year_breakdown=args.year_breakdown,
+                    gallery_breakdown=args.gallery_breakdown,
+                    camera_breakdown=args.camera_breakdown,
                 )
             )
             return 0

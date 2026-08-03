@@ -14,6 +14,7 @@ from ppa.models import (
     MediaType,
     Portfolio,
     SourceReference,
+    normalize_pixel_dimension,
 )
 from ppa.sources.base import (
     CancellationCheck,
@@ -217,6 +218,8 @@ def _asset(image: dict[str, Any], site_url: str) -> Asset:
                 image,
                 {"Uri", "Uris", "WebUri", "DateTimeOriginal"},
             ),
+            width_px=normalize_pixel_dimension(image.get("OriginalWidth")),
+            height_px=normalize_pixel_dimension(image.get("OriginalHeight")),
         ),
     )
 

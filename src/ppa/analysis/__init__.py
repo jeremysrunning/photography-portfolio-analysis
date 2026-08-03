@@ -12,6 +12,14 @@ from ppa.analysis.focal_length import (
     FocalLengthYearChange,
     analyze_focal_lengths,
 )
+from ppa.analysis.orientation import (
+    AspectRatio,
+    AspectRatioFrequency,
+    OrientationReport,
+    OrientationSegment,
+    analyze_orientation,
+    recorded_orientation,
+)
 from ppa.analysis.preview_structure import PreviewStructureAnalyzer
 from ppa.analysis.timeline import (
     CameraEra,
@@ -42,6 +50,8 @@ register_visual_analyzer(PreviewStructureAnalyzer())
 
 __all__ = [
     "PRODUCTION_IDENTITIES",
+    "AspectRatio",
+    "AspectRatioFrequency",
     "BaselineReport",
     "CameraEra",
     "CaptureGap",
@@ -54,6 +64,8 @@ __all__ = [
     "FocalLengthSegment",
     "FocalLengthSummary",
     "FocalLengthYearChange",
+    "OrientationReport",
+    "OrientationSegment",
     "PeriodCount",
     "PreviewStructureAnalyzer",
     "TimelineReport",
@@ -67,9 +79,11 @@ __all__ = [
     "analyze_baseline",
     "analyze_equipment",
     "analyze_focal_lengths",
+    "analyze_orientation",
     "analyze_timeline",
     "analyze_visual_habits",
     "get_visual_analyzer",
     "list_visual_analyzers",
+    "recorded_orientation",
     "register_visual_analyzer",
 ]

@@ -10,6 +10,10 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- Normalize independent source-reported original pixel dimensions in schema version 8
+  and add a neutral recorded-orientation and exact aspect-ratio report with bounded and
+  optional segmented output.
+
 - Typed aperture, exact rational exposure time, positive integer ISO, exact rational
   exposure compensation, and tri-state flash evidence with confirmed SmugMug mappings,
   additive SQLite schema version 7 migration/backfill, baseline coverage, and typed

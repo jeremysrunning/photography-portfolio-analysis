@@ -54,6 +54,8 @@ def _portfolio() -> Portfolio:
             iso=400,
             exposure_compensation_ev=RationalValue(-1, 3),
             flash_fired=False,
+            width_px=6000,
+            height_px=4000,
         ),
         preview_url="https://example.test/previews/1.jpg",
         measurements=(Measurement("aspect_ratio", 1.5, method="metadata"),),
@@ -333,7 +335,7 @@ def test_version_six_database_adds_and_backfills_exposure_columns(tmp_path) -> N
         ).fetchone()[0]
         row = connection.execute("SELECT * FROM assets").fetchone()
 
-    assert version == "7"
+    assert version == "8"
     assert row["aperture_f_number"] == 2.8
     assert (row["exposure_time_numerator"], row["exposure_time_denominator"]) == (1, 250)
     assert row["iso"] == 400
@@ -342,6 +344,32 @@ def test_version_six_database_adds_and_backfills_exposure_columns(tmp_path) -> N
         row["exposure_compensation_denominator"],
     ) == (2, 3)
     assert row["flash_fired"] == 0
+
+
+def test_version_seven_database_backfills_independent_dimensions(tmp_path) -> None:
+    database = tmp_path / "version-seven.sqlite3"
+    with SQLitePortfolioRepository(database) as repository:
+        repository.save(_portfolio())
+
+    with sqlite3.connect(database) as connection:
+        connection.execute("UPDATE assets SET source = 'smugmug' WHERE source_id = 'asset-1'")
+        connection.execute("ALTER TABLE assets DROP COLUMN original_width_px")
+        connection.execute("ALTER TABLE assets DROP COLUMN original_height_px")
+        connection.execute("UPDATE schema_metadata SET value = '7' WHERE key = 'version'")
+
+    with SQLitePortfolioRepository(database) as repository:
+        repository.initialize()
+
+    with sqlite3.connect(database) as connection:
+        connection.row_factory = sqlite3.Row
+        row = connection.execute("SELECT * FROM assets WHERE source_id = 'asset-1'").fetchone()
+    assert row is not None
+    assert (row["original_width_px"], row["original_height_px"]) == (6000, 4000)
+    assert (row["exposure_time_numerator"], row["exposure_time_denominator"]) == (1, 250)
+    assert (
+        row["exposure_compensation_numerator"],
+        row["exposure_compensation_denominator"],
+    ) == (-1, 3)
 
 
 def test_transaction_rolls_back_and_foreign_keys_are_enforced(tmp_path) -> None:

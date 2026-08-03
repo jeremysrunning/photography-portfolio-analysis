@@ -284,7 +284,13 @@ the registered identity's distributions.
 
 ## Persistence Round Trips
 
-SQLite schema version 7 mirrors the normalized graph:
+`AssetMetadata.width_px` and `height_px` independently preserve positive integral
+source-reported original pixel dimensions. SmugMug maps only the confirmed
+`OriginalWidth` and `OriginalHeight` fields. Missing or malformed values remain missing;
+preview and EXIF dimensions are not substituted. Recorded orientation and exact reduced
+directional aspect ratio are derived report values and are not persisted.
+
+SQLite schema version 8 mirrors the normalized graph:
 
 - portfolios and source references use explicit columns
 - galleries are stored independently from assets
