@@ -93,6 +93,9 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Changed
 
+- Reconciled the open backlog with merged implementation, documented the authoritative
+  discovery-to-reporting pipeline and its side effects, updated completed and blocked
+  visual-analysis roadmap status, and recorded Issue #13 as the next engineering priority.
 - Reconciled visual-analysis planning with the completed Issues #49 and #51 research:
   Issue #38 is explicitly blocked with no approved production people/face detector, and
   downstream report dependencies and the calibration-only research boundary are documented.
