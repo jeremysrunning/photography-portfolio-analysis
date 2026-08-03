@@ -50,6 +50,8 @@ def _asset(index: int, *, year: int = 2020, orientation: str = "landscape") -> A
                 "Model": "Camera A",
                 "LensModel": "Lens A",
             },
+            width_px=dimensions[0],
+            height_px=dimensions[1],
         ),
     )
 

@@ -287,6 +287,8 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
             values={"OriginalWidth": 3, "OriginalHeight": 2, "Format": "JPG"},
             focal_length_mm=35,
             focal_length_35mm=52.5,
+            width_px=3,
+            height_px=2,
         ),
     )
     portfolio = Portfolio(
@@ -313,6 +315,12 @@ def test_show_and_baseline_report_read_saved_portfolio(tmp_path, capsys) -> None
     report_output = capsys.readouterr().out
     assert "Baseline report: Example Portfolio" in report_output
     assert "landscape: 1 (100.0%)" in report_output
+
+    assert main(["report", "orientation", str(database), "--details"]) == 0
+    orientation_output = capsys.readouterr().out
+    assert "Orientation and aspect-ratio report: Example Portfolio" in orientation_output
+    assert "Landscape: 1 (100.0%)" in orientation_output
+    assert "3:2: 1 (100.0%)" in orientation_output
 
     assert main(["report", "equipment", str(database)]) == 0
     equipment_output = capsys.readouterr().out

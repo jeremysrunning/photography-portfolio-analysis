@@ -43,6 +43,8 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
             iso=400,
             exposure_compensation_ev=RationalValue(1, 3),
             flash_fired=False,
+            width_px=6000,
+            height_px=4000,
         ),
     )
     portrait = Asset(
@@ -55,6 +57,8 @@ def test_baseline_distinguishes_references_and_unique_photographs() -> None:
                 "OriginalHeight": 4000,
                 "Format": "JPG",
             },
+            width_px=3000,
+            height_px=4000,
         ),
     )
     video = Asset(
