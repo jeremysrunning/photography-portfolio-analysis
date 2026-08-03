@@ -141,3 +141,26 @@ def test_equipment_groups_exact_typed_exposure_and_ignores_raw_aliases() -> None
     assert report.apertures == {"f/2.8": 2}
     assert report.exposures == {"1/2 s": 2}
     assert report.iso_values == {"400": 2}
+
+
+def test_equipment_orders_equal_frequency_shutters_by_exact_duration() -> None:
+    boundary = 2**53
+    longer = RationalValue(boundary, boundary + 1)
+    shorter = RationalValue(boundary - 1, boundary)
+    assert float(longer) == float(shorter)
+    portfolio = Portfolio(
+        "test",
+        SourceReference("portfolio", "https://example.test"),
+        "Exact shutter ordering",
+        assets=(
+            _asset("longer", None, exposure=longer),
+            _asset("shorter", None, exposure=shorter),
+        ),
+    )
+
+    report = analyze_equipment(portfolio)
+
+    assert list(report.exposures) == [
+        f"{shorter.numerator}/{shorter.denominator} s",
+        f"{longer.numerator}/{longer.denominator} s",
+    ]

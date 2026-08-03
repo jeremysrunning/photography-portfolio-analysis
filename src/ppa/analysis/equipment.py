@@ -2,6 +2,7 @@
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from fractions import Fraction
 
 from ppa.analysis.assets import camera_name, text_value, unique_photographs
 from ppa.analysis.baseline import Coverage
@@ -113,7 +114,10 @@ def analyze_equipment(portfolio: Portfolio) -> EquipmentReport:
             _exposure_label(value): count
             for value, count in sorted(
                 exposures.items(),
-                key=lambda item: (-item[1], float(item[0])),
+                key=lambda item: (
+                    -item[1],
+                    Fraction(item[0].numerator, item[0].denominator),
+                ),
             )[:10]
         },
         iso_values={
