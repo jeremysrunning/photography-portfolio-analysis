@@ -8,12 +8,21 @@ from ppa.models import (
     GalleryPlacement,
     MediaType,
     Portfolio,
+    RationalValue,
     SourceReference,
 )
 from ppa.reports import render_equipment
 
 
-def _asset(source_id: str, captured_at, exif=None, focal_length_mm=None) -> Asset:
+def _asset(
+    source_id: str,
+    captured_at,
+    exif=None,
+    focal_length_mm=None,
+    aperture=None,
+    exposure=None,
+    iso=None,
+) -> Asset:
     return Asset(
         SourceReference(source_id, f"https://example.test/{source_id}"),
         AssetMetadata(
@@ -22,6 +31,9 @@ def _asset(source_id: str, captured_at, exif=None, focal_length_mm=None) -> Asse
             {"ImageKey": source_id},
             exif or {},
             focal_length_mm=focal_length_mm,
+            aperture_f_number=aperture,
+            exposure_time=exposure,
+            iso=iso,
         ),
     )
 
@@ -41,6 +53,9 @@ def test_equipment_report_measures_available_exif_without_ranking_quality() -> N
                 "ISO": 400,
             },
             35.0,
+            2.8,
+            RationalValue(1, 250),
+            400,
         ),
         _asset(
             "two",
@@ -55,6 +70,9 @@ def test_equipment_report_measures_available_exif_without_ranking_quality() -> N
                 "ISO": 1600,
             },
             135.0,
+            4.0,
+            RationalValue(1, 500),
+            1600,
         ),
         _asset(
             "three",
@@ -85,6 +103,41 @@ def test_equipment_report_measures_available_exif_without_ranking_quality() -> N
     assert report.cameras["Example Camera A"] == 2
     assert report.focal_length_ranges == {"35-69 mm": 1, ">=135 mm": 1}
     assert report.iso_ranges == {"101-400": 1, "801-1600": 1}
+    assert report.apertures == {"f/2.8": 1, "f/4": 1}
+    assert report.exposures == {"1/500 s": 1, "1/250 s": 1}
     assert report.yearly_cameras[0].camera == "Example Camera A"
     assert "Frequency describes use within this portfolio, not equipment quality." in rendered
     assert "best" not in rendered.casefold()
+
+
+def test_equipment_groups_exact_typed_exposure_and_ignores_raw_aliases() -> None:
+    assets = (
+        _asset(
+            "one",
+            None,
+            {"Exposure": "malformed", "Aperture": "99", "ISO": 99999},
+            aperture=2.8,
+            exposure=RationalValue(1, 2),
+            iso=400,
+        ),
+        _asset(
+            "two",
+            None,
+            {"ExposureTime": "1/1000", "FNumber": "22", "ISOSpeedRatings": 50},
+            aperture=2.8,
+            exposure=RationalValue(2, 4),
+            iso=400,
+        ),
+    )
+    portfolio = Portfolio(
+        "test",
+        SourceReference("portfolio", "https://example.test"),
+        "Typed exposure",
+        assets=assets,
+    )
+
+    report = analyze_equipment(portfolio)
+
+    assert report.apertures == {"f/2.8": 2}
+    assert report.exposures == {"1/2 s": 2}
+    assert report.iso_values == {"400": 2}

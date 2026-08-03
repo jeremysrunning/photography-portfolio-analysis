@@ -30,6 +30,14 @@ def render_baseline(report: BaselineReport) -> str:
         f"  Lens model: {_coverage(report.lens_coverage)}",
         f"  Focal length: {_coverage(report.focal_length_coverage)}",
         f"  35 mm equivalent: {_coverage(report.focal_length_35mm_coverage)}",
+        f"  Aperture: {_coverage(report.aperture_coverage)}",
+        f"  Exposure time: {_coverage(report.exposure_time_coverage)}",
+        f"  ISO: {_coverage(report.iso_coverage)}",
+        (f"  Exposure compensation: {_coverage(report.exposure_compensation_coverage)}"),
+        f"  Flash evidence: {_coverage(report.flash_evidence_coverage)}",
+        f"    Fired: {report.flash_fired:,}",
+        f"    Did not fire: {report.flash_not_fired:,}",
+        f"    Missing or ambiguous: {report.flash_missing_or_ambiguous:,}",
     ]
     if report.earliest_capture and report.latest_capture:
         lines.extend(

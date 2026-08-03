@@ -50,6 +50,14 @@ class BaselineReport:
     lenses: dict[str, int]
     focal_length_coverage: Coverage
     focal_length_35mm_coverage: Coverage
+    aperture_coverage: Coverage
+    exposure_time_coverage: Coverage
+    iso_coverage: Coverage
+    exposure_compensation_coverage: Coverage
+    flash_evidence_coverage: Coverage
+    flash_fired: int
+    flash_not_fired: int
+    flash_missing_or_ambiguous: int
 
 
 def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
@@ -76,6 +84,12 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
     lens_count = 0
     focal_length_count = 0
     focal_length_35mm_count = 0
+    aperture_count = 0
+    exposure_time_count = 0
+    iso_count = 0
+    exposure_compensation_count = 0
+    flash_evidence_count = 0
+    flash_fired_count = 0
 
     for asset in photographs:
         width = _positive_number(asset, "OriginalWidth", "width", "Width")
@@ -112,6 +126,18 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
             focal_length_count += 1
         if asset.metadata.focal_length_35mm is not None:
             focal_length_35mm_count += 1
+        if asset.metadata.aperture_f_number is not None:
+            aperture_count += 1
+        if asset.metadata.exposure_time is not None:
+            exposure_time_count += 1
+        if asset.metadata.iso is not None:
+            iso_count += 1
+        if asset.metadata.exposure_compensation_ev is not None:
+            exposure_compensation_count += 1
+        if asset.metadata.flash_fired is not None:
+            flash_evidence_count += 1
+            if asset.metadata.flash_fired:
+                flash_fired_count += 1
 
     return BaselineReport(
         title=portfolio.title,
@@ -138,6 +164,14 @@ def analyze_baseline(portfolio: Portfolio) -> BaselineReport:
         lenses=dict(lenses.most_common()),
         focal_length_coverage=Coverage(focal_length_count, total),
         focal_length_35mm_coverage=Coverage(focal_length_35mm_count, total),
+        aperture_coverage=Coverage(aperture_count, total),
+        exposure_time_coverage=Coverage(exposure_time_count, total),
+        iso_coverage=Coverage(iso_count, total),
+        exposure_compensation_coverage=Coverage(exposure_compensation_count, total),
+        flash_evidence_coverage=Coverage(flash_evidence_count, total),
+        flash_fired=flash_fired_count,
+        flash_not_fired=flash_evidence_count - flash_fired_count,
+        flash_missing_or_ambiguous=total - flash_evidence_count,
     )
 
 
