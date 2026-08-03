@@ -84,6 +84,8 @@ the normalized model and are never persisted.
 - an explicit `MediaType`
 - an optional capture timestamp
 - optional normalized native and 35 mm-equivalent focal lengths in millimeters
+- optional normalized aperture f-number, exact exposure time, positive ISO, exact exposure
+  compensation, and recorded flash-fired evidence
 - JSON-compatible normalized source values
 - JSON-compatible EXIF values
 
@@ -104,6 +106,24 @@ zero, negative, non-finite, and malformed values remain `None`; one focal-length
 never derived from the other. Reported teleconverter-adjusted focal lengths are preserved
 without attempting to identify an underlying lens or infer a crop factor. The original
 source representation remains available in the immutable EXIF mapping.
+
+Exposure time and exposure compensation share one narrow immutable `RationalValue`
+representation with a signed reduced numerator and positive denominator. Exposure time
+requires a positive value and represents exact seconds. Exposure compensation permits
+negative, zero, and positive values and represents exact EV, preserving recorded thirds
+without binary floating-point conversion. The two fields retain separate validation and
+rendering semantics; this is not a generic physical-units system.
+
+`aperture_f_number` is a positive finite numeric f-number. `iso` is a positive integer.
+`flash_fired` is `True` or `False` only when source evidence is unambiguous; `None` means
+missing, blank, malformed, unsupported, or ambiguous evidence. A false value says only
+that the recorded evidence indicates flash did not fire. It does not distinguish whether
+flash was disabled, unavailable, absent, suppressed, or unused for another reason.
+
+The SmugMug source boundary maps only the confirmed `Aperture`, `Exposure`, `ISO`,
+`ExposureCompensation`, and `Flash` tags. Parsers accept a small set of broader valid
+value representations for source-agnostic robustness, but the project does not claim
+that SmugMug emitted representations absent from the measured portfolio evidence.
 
 ## MediaType
 
@@ -264,7 +284,7 @@ the registered identity's distributions.
 
 ## Persistence Round Trips
 
-SQLite schema version 6 mirrors the normalized graph:
+SQLite schema version 7 mirrors the normalized graph:
 
 - portfolios and source references use explicit columns
 - galleries are stored independently from assets
@@ -272,14 +292,16 @@ SQLite schema version 6 mirrors the normalized graph:
 - gallery placements preserve the many-to-many relationship and ordering
 - media type, nullable capture timestamps, and nullable native and 35 mm-equivalent focal
   lengths use explicit columns
+- nullable aperture and ISO values, exact exposure-time and exposure-compensation
+  numerator/denominator pairs, and tri-state flash-fired evidence use explicit columns
 - extensible metadata, EXIF, measurements, observations, and findings use scoped JSON
 - visual run state and successful result snapshots use separate relational tables
 
 Saving and loading preserves semantic equality, including immutable metadata mappings,
 empty collections, missing values, non-photo and unknown media, source references, EXIF,
 timezone-aware timestamps, and one asset placed in multiple galleries. Version-2,
-version-3, version-4, and version-5 databases migrate forward without silently dropping
-records. Analyzer and configuration versions coexist without automatic pruning or
+version-3, version-4, version-5, and version-6 databases migrate forward without silently
+dropping records. Analyzer and configuration versions coexist without automatic pruning or
 supersession.
 
 ## Existing Analytical Records

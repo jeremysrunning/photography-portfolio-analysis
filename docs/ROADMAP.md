@@ -31,11 +31,12 @@ Completed:
 - deterministic composition and saliency visual analysis
 - deterministic preview-structure visual analysis
 - deterministic visual-habits reporting over persisted production measurements
+- normalized and persisted typed aperture, exact exposure time, ISO, exact exposure
+  compensation, and flash evidence
 - bounded NanoDet/YuNet calibration research and replacement-detector documentary research
 
 Next:
 
-- Issue #13: normalize and persist typed exposure metadata
 - Issue #8: measure explicit EXIF missingness after typed exposure metadata is available
 - Issue #12: normalize source-reported dimensions, then build the orientation and
   aspect-ratio habits report
