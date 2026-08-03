@@ -1,6 +1,13 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
-from ppa.analysis import AspectRatio, analyze_orientation
+from ppa.analysis import (
+    AspectRatio,
+    AspectRatioFrequency,
+    Coverage,
+    OrientationSegment,
+    analyze_orientation,
+)
 from ppa.models import (
     Asset,
     AssetMetadata,
@@ -140,3 +147,73 @@ def test_combined_breakdowns_do_not_duplicate_headings() -> None:
     )
     for heading in ("Capture-year breakdown", "Gallery breakdown", "Camera breakdown"):
         assert rendered.count(heading) == 1
+
+
+def _segment(label: str, key: str, usable: int, *, qualifies: bool = True) -> OrientationSegment:
+    return OrientationSegment(
+        key=key,
+        label=label,
+        photograph_count=max(usable, 20),
+        coverage=Coverage(usable, max(usable, 20)),
+        landscape=usable,
+        portrait=0,
+        square=0,
+        aspect_ratios=(AspectRatioFrequency(AspectRatio(3, 2), usable),),
+        qualifies_for_default=qualifies,
+    )
+
+
+def test_breakdown_limits_order_before_slicing_and_disclose_omissions() -> None:
+    base = analyze_orientation(
+        Portfolio("test", SourceReference("p", "https://example.test/p"), "Portfolio")
+    )
+    galleries = tuple(
+        [_segment("Gallery Z", "z", 40), _segment("Gallery A", "a", 40)]
+        + [_segment(f"Gallery {index:02}", f"g-{index:02}", 39 - index) for index in range(9)]
+        + [_segment("Too small", "small", 19, qualifies=False)]
+    )
+    cameras = tuple(
+        [_segment("Camera Z", "z", 40), _segment("Camera A", "a", 40)]
+        + [_segment(f"Camera {index}", f"c-{index}", 39 - index) for index in range(4)]
+        + [_segment("Unknown evidence", "small", 19, qualifies=False)]
+    )
+    years = tuple(
+        [_segment("2022", "2022", 20), _segment("2020", "2020", 20), _segment("2021", "2021", 20)]
+    )
+    report = replace(
+        base,
+        gallery_segments=galleries,
+        camera_segments=cameras,
+        year_segments=years,
+    )
+
+    rendered = render_orientation(
+        report,
+        gallery_breakdown=True,
+        camera_breakdown=True,
+        year_breakdown=True,
+    )
+    assert rendered.count("Gallery breakdown") == 1
+    assert rendered.count("Camera breakdown") == 1
+    assert rendered.count("Capture-year breakdown") == 1
+    assert "  Gallery A:" in rendered
+    assert "  Gallery Z:" in rendered
+    assert sum(line.startswith("  Gallery ") for line in rendered.splitlines()) == 10
+    assert rendered.index("  Gallery A:") < rendered.index("  Gallery Z:")
+    assert "  Gallery 08:" not in rendered
+    assert rendered.index("  Camera A:") < rendered.index("  Camera Z:")
+    assert sum(line.startswith("  Camera ") for line in rendered.splitlines()) == 5
+    assert "  Camera 3:" not in rendered
+    assert rendered.index("  2020:") < rendered.index("  2021:") < rendered.index("  2022:")
+    assert all(f"  {year}:" in rendered for year in (2020, 2021, 2022))
+    assert rendered.count("Segments omitted for insufficient evidence: 1") == 2
+    assert rendered.count("Additional qualifying segments not shown: 1") == 2
+    assert (
+        render_orientation(
+            report,
+            gallery_breakdown=True,
+            camera_breakdown=True,
+            year_breakdown=True,
+        )
+        == rendered
+    )

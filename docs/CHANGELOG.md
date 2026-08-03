@@ -14,8 +14,6 @@ The format is intentionally simple. This project values documenting the evolutio
   and add a neutral recorded-orientation and exact aspect-ratio report with bounded and
   optional segmented output.
 
-### Added
-
 - Typed aperture, exact rational exposure time, positive integer ISO, exact rational
   exposure compensation, and tri-state flash evidence with confirmed SmugMug mappings,
   additive SQLite schema version 7 migration/backfill, baseline coverage, and typed

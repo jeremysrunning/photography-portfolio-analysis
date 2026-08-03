@@ -62,7 +62,10 @@ def render_orientation(
     ):
         if enabled:
             qualifying = [segment for segment in segments if segment.qualifies_for_default]
-            if default_limit is not None:
+            insufficient_count = len(segments) - len(qualifying)
+            if default_limit is None:
+                qualifying.sort(key=lambda segment: int(segment.key))
+            else:
                 qualifying.sort(
                     key=lambda segment: (
                         -segment.coverage.available,
@@ -70,11 +73,21 @@ def render_orientation(
                         segment.key,
                     )
                 )
+            displayed = qualifying if default_limit is None else qualifying[:default_limit]
+            display_omitted_count = len(qualifying) - len(displayed)
             lines.extend(["", heading])
             if not qualifying:
                 lines.append("  unavailable (no segments meet the evidence threshold)")
-            for segment in qualifying:
+            for segment in displayed:
                 lines.extend(_segment(segment))
+            if insufficient_count:
+                lines.append(
+                    f"  Segments omitted for insufficient evidence: {insufficient_count:,}"
+                )
+            if display_omitted_count:
+                lines.append(
+                    f"  Additional qualifying segments not shown: {display_omitted_count:,}"
+                )
 
     lines.extend(
         [
