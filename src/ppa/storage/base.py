@@ -35,6 +35,21 @@ class VisualAnalysisRecord:
     snapshot: VisualAnalysisSnapshot
 
 
+@dataclass(frozen=True, slots=True)
+class VisualAnalysisClaim:
+    """Ownership of one exact visual-analysis attempt generation."""
+
+    attempt_generation: int
+
+    def __post_init__(self) -> None:
+        if self.attempt_generation < 1:
+            raise ValueError("visual-analysis attempt generation must be positive")
+
+
+class VisualAnalysisOwnershipLostError(RuntimeError):
+    """Raised when a terminal transition no longer owns the running attempt."""
+
+
 @runtime_checkable
 class PortfolioRepository(Protocol):
     """Persist normalized datasets without storing original image content."""
@@ -154,8 +169,8 @@ class VisualAnalysisRepository(Protocol):
         retry_failed: bool = False,
         refresh: bool = False,
         at: datetime | None = None,
-    ) -> bool:
-        """Atomically claim an eligible exact identity for one attempt."""
+    ) -> VisualAnalysisClaim | None:
+        """Atomically claim an eligible identity and return its attempt generation."""
         ...
 
     def complete_visual_analysis(
@@ -166,6 +181,7 @@ class VisualAnalysisRepository(Protocol):
         identity: AnalyzerIdentity,
         results: tuple[VisualResult, ...],
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Atomically replace results and complete the running attempt."""
@@ -180,6 +196,7 @@ class VisualAnalysisRepository(Protocol):
         category: str,
         message: str,
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Fail a running attempt without deleting a successful snapshot."""
@@ -193,6 +210,7 @@ class VisualAnalysisRepository(Protocol):
         identity: AnalyzerIdentity,
         category: str = "cancelled",
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Return a running attempt to retryable pending state."""
@@ -206,6 +224,7 @@ class VisualAnalysisRepository(Protocol):
         identity: AnalyzerIdentity,
         reason: str,
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Skip a running attempt without creating completed results."""

@@ -722,6 +722,7 @@ def _analyze_visual(args: argparse.Namespace, parser: argparse.ArgumentParser) -
     print(f"  Existing failed but excluded: {result.failed_excluded:,}")
     print(f"  Pending but excluded by state selection: {result.pending_excluded:,}")
     print(f"  Running elsewhere or left running: {result.running_excluded:,}")
+    print(f"  Attempt ownership lost before persistence: {result.ownership_lost:,}")
     print(f"  Cancellation-interrupted: {result.cancelled:,}")
     print(f"  Remaining selected work: {result.remaining_selected_work:,}")
     print(f"  Downloaded preview bytes: {result.downloaded_bytes:,}")

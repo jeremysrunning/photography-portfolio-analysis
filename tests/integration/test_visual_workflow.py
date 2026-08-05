@@ -1062,3 +1062,56 @@ def test_two_commands_cannot_process_same_exact_identity(tmp_path) -> None:
     assert second.running_excluded == 1
     assert sum(result.completed for result in results) == 1
     assert analyzer.calls == ["photo-a"]
+
+
+def test_ownership_loss_is_not_recorded_as_analyzer_failure_and_cleanup_completes(
+    tmp_path,
+) -> None:
+    portfolio, database = _saved(tmp_path)
+    identity = AnalyzerIdentity("ownership-loss", "1", "defaults")
+
+    class OwnershipLosingAnalyzer(FakeAnalyzer):
+        def analyze(self, asset, image, metadata):
+            results = super().analyze(asset, image, metadata)
+            with SQLitePortfolioRepository(database) as repository:
+                running = repository.visual_analysis_snapshot(
+                    "smugmug", "portfolio", asset.source_id, identity
+                )
+                repository.cancel_visual_analysis(
+                    "smugmug",
+                    "portfolio",
+                    asset.source_id,
+                    identity,
+                    expected_generation=running.state.attempts,
+                )
+                next_claim = repository.claim_visual_analysis(
+                    "smugmug",
+                    "portfolio",
+                    asset.source_id,
+                    identity,
+                    retry_failed=True,
+                )
+                assert next_claim is not None
+                assert next_claim.attempt_generation == 2
+            return results
+
+    source = FakeSource()
+    result = run_visual_analysis(
+        portfolio,
+        database,
+        "secret",
+        OwnershipLosingAnalyzer(identity=identity),
+        options=VisualAnalysisOptions(limit=1),
+        source_factory=lambda *_: source,
+    )
+
+    assert result.ownership_lost == 1
+    assert result.completed == result.failed == result.cancelled == 0
+    assert result.processed_work_items == 1
+    assert result.remaining_selected_work == 0
+    assert source.resources[0].closed
+    with SQLitePortfolioRepository(database) as repository:
+        snapshot = repository.visual_analysis_snapshot("smugmug", "portfolio", "photo-a", identity)
+    assert snapshot.state.status is VisualRunStatus.RUNNING
+    assert snapshot.state.attempts == 2
+    assert snapshot.results == ()
