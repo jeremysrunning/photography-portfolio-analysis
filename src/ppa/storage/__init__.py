@@ -7,6 +7,7 @@ from ppa.storage.base import (
     VisualAnalysisClaim,
     VisualAnalysisOwnershipLostError,
     VisualAnalysisRecord,
+    VisualAnalysisRecoveryResult,
     VisualAnalysisRepository,
 )
 from ppa.storage.sqlite import SQLitePortfolioRepository, UnsupportedSchemaVersionError
@@ -20,5 +21,6 @@ __all__ = [
     "VisualAnalysisClaim",
     "VisualAnalysisOwnershipLostError",
     "VisualAnalysisRecord",
+    "VisualAnalysisRecoveryResult",
     "VisualAnalysisRepository",
 ]

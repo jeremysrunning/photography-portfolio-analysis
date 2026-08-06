@@ -35,6 +35,7 @@ from ppa.storage.base import (
     VisualAnalysisClaim,
     VisualAnalysisOwnershipLostError,
     VisualAnalysisRecord,
+    VisualAnalysisRecoveryResult,
 )
 from ppa.visual import (
     AnalyzerIdentity,
@@ -830,6 +831,85 @@ class SQLitePortfolioRepository:
                 (next_generation, timestamp, timestamp, *key),
             )
             return VisualAnalysisClaim(next_generation)
+
+    def recover_stale_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        identity: AnalyzerIdentity,
+        cutoff: datetime,
+        *,
+        dry_run: bool,
+        at: datetime | None = None,
+    ) -> VisualAnalysisRecoveryResult:
+        """Inspect or recover exact-identity running attempts at an inclusive cutoff."""
+        self.initialize()
+        if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            raise ValueError("stale recovery cutoff must be timezone-aware")
+        cutoff_utc = cutoff.astimezone(UTC)
+        recovery_timestamp = _timestamp(at)
+        connection = self._connect()
+        rows = connection.execute(
+            """
+            SELECT asset_source_id, attempts, started_at
+            FROM visual_analysis_runs
+            WHERE source = ? AND portfolio_source_id = ?
+              AND analyzer_name = ? AND analyzer_version = ?
+              AND configuration_version = ? AND status = 'running'
+            ORDER BY asset_source_id
+            """,
+            (
+                source,
+                portfolio_source_id,
+                identity.name,
+                identity.version,
+                identity.configuration_version,
+            ),
+        ).fetchall()
+        candidates = []
+        for row in rows:
+            started_at = _read_timestamp(row["started_at"])
+            if started_at is not None and started_at.astimezone(UTC) <= cutoff_utc:
+                candidates.append(row)
+        too_recent = len(rows) - len(candidates)
+        if dry_run:
+            return VisualAnalysisRecoveryResult(len(rows), len(candidates), too_recent, 0, 0, True)
+
+        recovered = 0
+        no_longer_eligible = 0
+        with self._immediate_transaction() as transaction:
+            for row in candidates:
+                cursor = transaction.execute(
+                    """
+                    UPDATE visual_analysis_runs
+                    SET status = 'pending', updated_at = ?,
+                        interruption_category = 'stale_recovered', interrupted_at = ?,
+                        error_category = NULL, error_message = NULL, skip_reason = NULL
+                    WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+                      AND analyzer_name = ? AND analyzer_version = ?
+                      AND configuration_version = ? AND status = 'running'
+                      AND attempts = ? AND started_at = ?
+                    """,
+                    (
+                        recovery_timestamp,
+                        recovery_timestamp,
+                        source,
+                        portfolio_source_id,
+                        row["asset_source_id"],
+                        identity.name,
+                        identity.version,
+                        identity.configuration_version,
+                        row["attempts"],
+                        row["started_at"],
+                    ),
+                )
+                if cursor.rowcount == 1:
+                    recovered += 1
+                else:
+                    no_longer_eligible += 1
+        return VisualAnalysisRecoveryResult(
+            len(rows), len(candidates), too_recent, recovered, no_longer_eligible, False
+        )
 
     def complete_visual_analysis(
         self,

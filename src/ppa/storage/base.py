@@ -46,6 +46,18 @@ class VisualAnalysisClaim:
             raise ValueError("visual-analysis attempt generation must be positive")
 
 
+@dataclass(frozen=True, slots=True)
+class VisualAnalysisRecoveryResult:
+    """Aggregate outcome of one exact-identity stale-work recovery operation."""
+
+    running_examined: int
+    cutoff_candidates: int
+    too_recent: int
+    recovered: int
+    no_longer_eligible: int
+    dry_run: bool
+
+
 class VisualAnalysisOwnershipLostError(RuntimeError):
     """Raised when a terminal transition no longer owns the running attempt."""
 
@@ -157,6 +169,19 @@ class VisualAnalysisRepository(Protocol):
         identity: AnalyzerIdentity,
     ) -> VisualAnalysisSnapshot:
         """Return current attempt state and the last successful result snapshot."""
+        ...
+
+    def recover_stale_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        identity: AnalyzerIdentity,
+        cutoff: datetime,
+        *,
+        dry_run: bool,
+        at: datetime | None = None,
+    ) -> VisualAnalysisRecoveryResult:
+        """Inspect or recover running work at or before an inclusive UTC cutoff."""
         ...
 
     def claim_visual_analysis(

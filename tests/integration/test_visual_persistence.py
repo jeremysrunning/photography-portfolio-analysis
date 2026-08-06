@@ -53,6 +53,99 @@ def _repository(database) -> SQLitePortfolioRepository:
     return repository
 
 
+def test_stale_recovery_dry_run_and_inclusive_confirmed_transition(tmp_path) -> None:
+    repository = _repository(tmp_path / "portfolio.sqlite3")
+    claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert claim == VisualAnalysisClaim(1)
+
+    dry_run = repository.recover_stale_visual_analysis(
+        "test", "portfolio-1", IDENTITY, T0, dry_run=True, at=T0 + timedelta(hours=1)
+    )
+    assert dry_run.running_examined == 1
+    assert dry_run.cutoff_candidates == 1
+    assert dry_run.too_recent == 0
+    assert dry_run.recovered == 0
+    assert dry_run.dry_run is True
+    assert (
+        repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY).state.status
+        is VisualRunStatus.RUNNING
+    )
+
+    recovered = repository.recover_stale_visual_analysis(
+        "test", "portfolio-1", IDENTITY, T0, dry_run=False, at=T0 + timedelta(hours=1)
+    )
+    assert recovered.recovered == 1
+    state = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY).state
+    assert state.status is VisualRunStatus.PENDING
+    assert state.attempts == 1
+    assert state.started_at == T0
+    assert state.interruption_category == "stale_recovered"
+
+
+def test_stale_recovery_preserves_successful_snapshot_and_resume_matrix(tmp_path) -> None:
+    repository = _repository(tmp_path / "portfolio.sqlite3")
+    first = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert first is not None
+    repository.complete_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result(),),
+        expected_generation=first.attempt_generation,
+        at=T0 + timedelta(minutes=1),
+    )
+    refresh = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, refresh=True, at=T0 + timedelta(hours=1)
+    )
+    assert refresh == VisualAnalysisClaim(2)
+    repository.recover_stale_visual_analysis(
+        "test",
+        "portfolio-1",
+        IDENTITY,
+        T0 + timedelta(hours=1),
+        dry_run=False,
+        at=T0 + timedelta(hours=2),
+    )
+    snapshot = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    assert snapshot.state.status is VisualRunStatus.PENDING
+    assert snapshot.state.last_successful_completed_at == T0 + timedelta(minutes=1)
+    assert [result.name for result in snapshot.results] == ["brightness"]
+    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY) is None
+    retried = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, retry_failed=True
+    )
+    assert retried == VisualAnalysisClaim(3)
+
+
+def test_concurrent_stale_recovery_changes_one_generation_once(tmp_path) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    repository = _repository(database)
+    assert repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, at=T0
+    ) == VisualAnalysisClaim(1)
+    repository.close()
+
+    def recover():
+        with SQLitePortfolioRepository(database) as worker:
+            return worker.recover_stale_visual_analysis(
+                "test",
+                "portfolio-1",
+                IDENTITY,
+                T0,
+                dry_run=False,
+                at=T0 + timedelta(hours=1),
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = tuple(executor.map(lambda _: recover(), range(2)))
+    assert sum(outcome.recovered for outcome in outcomes) == 1
+    with SQLitePortfolioRepository(database) as check:
+        snapshot = check.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    assert snapshot.state.status is VisualRunStatus.PENDING
+    assert snapshot.state.attempts == 1
+
+
 def test_schema_v6_creation_and_v5_additive_migration(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
     repository = _repository(database)

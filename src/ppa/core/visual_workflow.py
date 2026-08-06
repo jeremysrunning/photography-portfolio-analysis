@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from threading import Event
@@ -28,8 +29,12 @@ from ppa.sources import (
     SourceTransientError,
 )
 from ppa.sources.smugmug import SmugMugSource
-from ppa.storage import SQLitePortfolioRepository, VisualAnalysisOwnershipLostError
-from ppa.visual import VisualRunStatus
+from ppa.storage import (
+    SQLitePortfolioRepository,
+    VisualAnalysisOwnershipLostError,
+    VisualAnalysisRecoveryResult,
+)
+from ppa.visual import AnalyzerIdentity, VisualRunStatus
 
 ProgressCallback = Callable[["VisualProgress"], None]
 SourceFactory = Callable[[Portfolio, str], GallerySource]
@@ -40,6 +45,32 @@ Sleeper = Callable[[float], None]
 
 class VisualWorkflowError(RuntimeError):
     """Raised when visual analysis cannot safely begin."""
+
+
+def recover_stale_visual_analysis(
+    portfolio: Portfolio,
+    database: Path,
+    identity: AnalyzerIdentity,
+    stale_after: timedelta,
+    *,
+    confirm: bool,
+    at: datetime | None = None,
+    repository_factory: RepositoryFactory = SQLitePortfolioRepository,
+) -> VisualAnalysisRecoveryResult:
+    """Inspect or explicitly recover stale running work for one exact identity."""
+    recovery_time = (at or datetime.now(UTC)).astimezone(UTC)
+    if stale_after <= timedelta(0):
+        raise ValueError("stale-after must be positive")
+    cutoff = recovery_time - stale_after
+    with repository_factory(database) as repository:
+        return repository.recover_stale_visual_analysis(
+            portfolio.source_name,
+            portfolio.source_id,
+            identity,
+            cutoff,
+            dry_run=not confirm,
+            at=recovery_time,
+        )
 
 
 class _UnexpectedEmptyResults(RuntimeError):

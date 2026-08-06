@@ -3,8 +3,10 @@
 import argparse
 import logging
 import os
+import re
 import time
 from collections.abc import Sequence
+from datetime import timedelta
 from pathlib import Path
 
 from ppa import __version__
@@ -25,6 +27,7 @@ from ppa.core.visual_workflow import (
     VisualAnalysisOptions,
     VisualProgress,
     VisualWorkflowError,
+    recover_stale_visual_analysis,
     run_visual_analysis,
 )
 from ppa.core.workflows import (
@@ -215,9 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="SmugMug API key (prefer PPA_SMUGMUG_API_KEY).",
     )
     visual.add_argument("--limit", type=int, help="Maximum sorted photographs to select.")
-    visual.add_argument(
-        "--workers", type=int, default=1, help="Concurrent asset workers (1-4; default: 1)."
-    )
+    visual.add_argument("--workers", type=int, help="Concurrent asset workers (1-4; default: 1).")
     visual.add_argument("--refresh", action="store_true", help="Refresh completed work.")
     visual.add_argument(
         "--retry-failed",
@@ -233,6 +234,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="Select this exact gallery source ID.",
     )
     visual.add_argument("--year", type=int, help="Select this recorded capture year.")
+    visual.add_argument(
+        "--recover-stale",
+        action="store_true",
+        help="Operator-triggered inspection of running work for one exact analyzer identity; "
+        "dry run by default.",
+    )
+    visual.add_argument(
+        "--stale-after",
+        help="Stale-recovery age threshold: a positive integer plus m, h, or d (e.g. 4h). "
+        "Age is candidate evidence, not proof of abandonment.",
+    )
+    visual.add_argument(
+        "--confirm-recovery",
+        action="store_true",
+        help="Apply stale recovery instead of a dry run; recovered work resumes via "
+        "--retry-failed.",
+    )
     enrich = commands.add_parser("enrich", help="Add source metadata to a saved dataset.")
     enrich_commands = enrich.add_subparsers(dest="enrich_command", required=True)
     exif = enrich_commands.add_parser(
@@ -634,7 +652,60 @@ def _print_resume_guidance() -> None:
     print("Use --retry-failed when failed records need another attempt.")
 
 
+def _parse_stale_duration(value: str | None) -> timedelta:
+    if value is None:
+        raise ValueError("stale-after is required")
+    match = re.fullmatch(r"([1-9][0-9]*)([mhd])", value)
+    if match is None:
+        raise ValueError("stale-after must be a positive integer followed by m, h, or d")
+    amount = int(match.group(1))
+    unit = match.group(2)
+    try:
+        if unit == "m":
+            return timedelta(minutes=amount)
+        if unit == "h":
+            return timedelta(hours=amount)
+        return timedelta(days=amount)
+    except OverflowError as error:
+        raise ValueError("stale-after is too large") from error
+
+
+def _validate_visual_recovery_arguments(
+    args: argparse.Namespace, parser: argparse.ArgumentParser
+) -> None:
+    if args.stale_after is not None and not args.recover_stale:
+        parser.error("--stale-after requires --recover-stale")
+    if args.confirm_recovery and not args.recover_stale:
+        parser.error("--confirm-recovery requires --recover-stale")
+    if not args.recover_stale:
+        return
+    if not args.analyzer:
+        parser.error("--recover-stale requires --analyzer")
+    if args.stale_after is None:
+        parser.error("--recover-stale requires --stale-after")
+    try:
+        _parse_stale_duration(args.stale_after)
+    except ValueError as error:
+        parser.error(str(error))
+    incompatible = []
+    for enabled, flag in (
+        (args.list_analyzers, "--list-analyzers"),
+        (args.limit is not None, "--limit"),
+        (args.workers is not None, "--workers"),
+        (args.refresh, "--refresh"),
+        (args.retry_failed, "--retry-failed"),
+        (args.only_failed, "--only-failed"),
+        (args.gallery_source_id is not None, "--gallery"),
+        (args.year is not None, "--year"),
+    ):
+        if enabled:
+            incompatible.append(flag)
+    if incompatible:
+        parser.error("--recover-stale cannot be combined with " + ", ".join(incompatible))
+
+
 def _analyze_visual(args: argparse.Namespace, parser: argparse.ArgumentParser) -> int:
+    _validate_visual_recovery_arguments(args, parser)
     names = list_visual_analyzers()
     if args.list_analyzers:
         if names:
@@ -655,6 +726,31 @@ def _analyze_visual(args: argparse.Namespace, parser: argparse.ArgumentParser) -
         print(f"Unknown visual analyzer: {args.analyzer}")
         print("Registered visual analyzers: " + ", ".join(names))
         return 1
+    if args.recover_stale:
+        try:
+            portfolio = _load_stored_portfolio(args.database, args.source, args.source_id)
+            result = recover_stale_visual_analysis(
+                portfolio,
+                args.database,
+                analyzer.identity,
+                _parse_stale_duration(args.stale_after),
+                confirm=args.confirm_recovery,
+            )
+        except (OSError, SourceError, ValueError, VisualWorkflowError):
+            logger.error("visual_recovery_failed")
+            print("Stale recovery did not complete: database configuration is invalid.")
+            return 1
+        print("Stale visual-analysis recovery")
+        print(f"  Analyzer: {analyzer.identity.name}")
+        print(f"  Analyzer version: {analyzer.identity.version}")
+        print(f"  Configuration version: {analyzer.identity.configuration_version}")
+        print(f"  Mode: {'Dry run' if result.dry_run else 'Recovery'}")
+        print(f"  Running rows examined: {result.running_examined:,}")
+        print(f"  Meeting inclusive cutoff: {result.cutoff_candidates:,}")
+        print(f"  Too recent: {result.too_recent:,}")
+        print(f"  Recovered: {result.recovered:,}")
+        print(f"  No longer eligible: {result.no_longer_eligible:,}")
+        return 0
     if not args.api_key:
         parser.error(
             "analyze visual requires --api-key or the PPA_SMUGMUG_API_KEY environment variable"
@@ -662,7 +758,7 @@ def _analyze_visual(args: argparse.Namespace, parser: argparse.ArgumentParser) -
     try:
         options = VisualAnalysisOptions(
             limit=args.limit,
-            workers=args.workers,
+            workers=args.workers or 1,
             refresh=args.refresh,
             retry_failed=args.retry_failed,
             only_failed=args.only_failed,
