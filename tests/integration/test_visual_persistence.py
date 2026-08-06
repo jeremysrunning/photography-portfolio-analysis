@@ -1,6 +1,7 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 
 import pytest
 
@@ -9,6 +10,7 @@ from ppa.storage import (
     SQLitePortfolioRepository,
     VisualAnalysisClaim,
     VisualAnalysisOwnershipLostError,
+    VisualAnalysisRecoveryResult,
 )
 from ppa.storage.sqlite import SCHEMA_VERSION
 from ppa.visual import (
@@ -144,6 +146,89 @@ def test_concurrent_stale_recovery_changes_one_generation_once(tmp_path) -> None
         snapshot = check.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
     assert snapshot.state.status is VisualRunStatus.PENDING
     assert snapshot.state.attempts == 1
+
+
+def test_concurrent_completion_versus_stale_recovery_yields_one_legal_outcome(tmp_path) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    repository = _repository(database)
+    first = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert first == VisualAnalysisClaim(1)
+    repository.complete_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result("brightness", 0.4),),
+        expected_generation=first.attempt_generation,
+        at=T0 + timedelta(minutes=1),
+    )
+    refresh = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, refresh=True, at=T0 + timedelta(hours=1)
+    )
+    assert refresh == VisualAnalysisClaim(2)
+    repository.close()
+
+    barrier = Barrier(2)
+    completion_outcome: dict[str, str] = {}
+    recovery_outcome: dict[str, VisualAnalysisRecoveryResult] = {}
+
+    def complete() -> None:
+        with SQLitePortfolioRepository(database) as worker:
+            barrier.wait(timeout=10)
+            try:
+                worker.complete_visual_analysis(
+                    "test",
+                    "portfolio-1",
+                    "asset-1",
+                    IDENTITY,
+                    (_result("brightness", 0.9),),
+                    expected_generation=refresh.attempt_generation,
+                    at=T0 + timedelta(hours=1, minutes=5),
+                )
+                completion_outcome["status"] = "completed"
+            except VisualAnalysisOwnershipLostError:
+                completion_outcome["status"] = "ownership_lost"
+
+    def recover() -> None:
+        with SQLitePortfolioRepository(database) as worker:
+            barrier.wait(timeout=10)
+            recovery_outcome["result"] = worker.recover_stale_visual_analysis(
+                "test",
+                "portfolio-1",
+                IDENTITY,
+                T0 + timedelta(hours=1),
+                dry_run=False,
+                at=T0 + timedelta(hours=2),
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(complete), executor.submit(recover)]
+        for future in futures:
+            future.result(timeout=10)
+
+    with SQLitePortfolioRepository(database) as check:
+        snapshot = check.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    recovered = recovery_outcome["result"]
+
+    if snapshot.state.status is VisualRunStatus.COMPLETED:
+        assert completion_outcome["status"] == "completed"
+        assert recovered.recovered == 0
+        assert snapshot.state.interruption_category is None
+        assert snapshot.state.attempts == 2
+        assert snapshot.state.last_successful_completed_at == T0 + timedelta(hours=1, minutes=5)
+        assert [result.name for result in snapshot.results] == ["brightness"]
+        assert snapshot.results[0].value == pytest.approx(0.9)
+    elif snapshot.state.status is VisualRunStatus.PENDING:
+        assert completion_outcome["status"] == "ownership_lost"
+        assert recovered.recovered == 1
+        assert snapshot.state.interruption_category == "stale_recovered"
+        assert snapshot.state.attempts == 2
+        assert snapshot.state.started_at == T0 + timedelta(hours=1)
+        assert snapshot.state.last_successful_completed_at == T0 + timedelta(minutes=1)
+        assert [result.name for result in snapshot.results] == ["brightness"]
+        assert snapshot.results[0].value == pytest.approx(0.4)
+    else:
+        pytest.fail(f"unexpected final status: {snapshot.state.status}")
 
 
 def test_schema_v6_creation_and_v5_additive_migration(tmp_path) -> None:
