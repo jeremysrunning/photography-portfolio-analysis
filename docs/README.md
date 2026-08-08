@@ -272,9 +272,36 @@ are blocked and are not presented as negative classifications.
 
 Completed work is skipped unless `--refresh` is supplied. `--retry-failed` includes durable
 failures and cancellation-interrupted pending work; `--only-failed` includes only durable
-failures. Existing `running` work is never reclaimed automatically and is reported as
-running elsewhere or left running. Preview data remains temporary, while each completed
-asset result set is committed incrementally.
+failures. Preview data remains temporary, while each completed asset result set is
+committed incrementally.
+
+`running` work is never reclaimed automatically. Each claim owns an incrementing attempt
+generation, and only that exact generation may complete, fail, cancel, or skip it; a worker
+that loses ownership can no longer mutate results. When a `running` attempt is genuinely
+stranded (a crashed process, a killed job), inspect and optionally recover it explicitly:
+
+```console
+ppa analyze visual portfolio.sqlite3 --analyzer color-luminance --recover-stale --stale-after 4h
+```
+
+`--stale-after` accepts a positive integer immediately followed by `m`, `h`, or `d` (for
+example `30m`, `4h`, `2d`). Recovery scans `running` attempts for the selected analyzer
+identity and reports how many were examined, how many have a `started_at` at or before the
+inclusive UTC cutoff, how many were too recent, and how many were recovered — aggregate
+counts only, never per-asset detail. Age is candidate evidence, not proof that the worker
+died; `--recover-stale` always runs as a dry run unless `--confirm-recovery` is also given:
+
+```console
+ppa analyze visual portfolio.sqlite3 --analyzer color-luminance --recover-stale --stale-after 4h --confirm-recovery
+```
+
+A confirmed recovery returns each qualifying attempt to `pending` with a
+`stale_recovered` interruption category, preserving its attempt count, `started_at`, and
+any retained successful snapshot. Recovered work is not picked up by an ordinary rerun; it
+resumes only through `--retry-failed`, the same as any other interrupted pending work.
+`--only-failed` still selects only durable failures. Recovery never contacts the source,
+never fetches a preview, and never invokes an analyzer — it only inspects and updates
+persisted run state for the one exact identity given.
 
 Analyzers must normally emit at least one result. An analyzer may explicitly declare that
 an empty result set is a valid success; otherwise empty output is recorded as a failed

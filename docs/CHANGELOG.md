@@ -10,6 +10,11 @@ The format is intentionally simple. This project values documenting the evolutio
 
 ### Added
 
+- Attempt-generation ownership fencing for visual-analysis terminal transitions, plus
+  explicit, dry-run-by-default `--recover-stale`/`--stale-after`/`--confirm-recovery`
+  recovery of stranded `running` work for one exact analyzer identity, with an inclusive
+  `started_at` cutoff, aggregate-only reporting, preserved attempt counts and successful
+  snapshots, and resume only through `--retry-failed`. No schema migration.
 - Normalize independent source-reported original pixel dimensions in schema version 8
   and add a neutral recorded-orientation and exact aspect-ratio report with bounded and
   optional segmented output.

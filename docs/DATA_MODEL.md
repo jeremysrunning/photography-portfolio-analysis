@@ -166,6 +166,9 @@ refresh, failure, or cancellation, readers can
 therefore distinguish an older successful snapshot from the current incomplete attempt.
 Cancellation returns the identity to `pending`, retains its incremented attempt count, and
 records an interruption category and timestamp. Its next claim requires explicit retry.
+Explicit, confirmed stale recovery (see `docs/README.md`) returns a `running` identity to
+`pending` the same way, using the distinct `stale_recovered` interruption category; it
+never changes the attempt count, `started_at`, or a retained successful snapshot.
 
 ### Color and luminance result catalog
 
