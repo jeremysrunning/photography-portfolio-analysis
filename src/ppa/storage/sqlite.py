@@ -29,7 +29,14 @@ from ppa.models import (
     normalize_iso,
     normalize_pixel_dimension,
 )
-from ppa.storage.base import EnrichmentStatus, EnrichmentTarget, VisualAnalysisRecord
+from ppa.storage.base import (
+    EnrichmentStatus,
+    EnrichmentTarget,
+    VisualAnalysisClaim,
+    VisualAnalysisOwnershipLostError,
+    VisualAnalysisRecord,
+    VisualAnalysisRecoveryResult,
+)
 from ppa.visual import (
     AnalyzerIdentity,
     VisualAnalysisSnapshot,
@@ -767,8 +774,8 @@ class SQLitePortfolioRepository:
         retry_failed: bool = False,
         refresh: bool = False,
         at: datetime | None = None,
-    ) -> bool:
-        """Atomically claim an eligible exact identity for one attempt."""
+    ) -> VisualAnalysisClaim | None:
+        """Atomically claim an eligible identity and return its attempt generation."""
         self.initialize()
         timestamp = _timestamp(at)
         key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
@@ -776,7 +783,7 @@ class SQLitePortfolioRepository:
             self._require_asset(connection, source, portfolio_source_id, asset_source_id)
             row = connection.execute(
                 """
-                SELECT status, interruption_category
+                SELECT status, attempts, interruption_category
                 FROM visual_analysis_runs
                 WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
                   AND analyzer_name = ? AND analyzer_version = ?
@@ -795,7 +802,7 @@ class SQLitePortfolioRepository:
                     """,
                     (*key, timestamp, timestamp),
                 )
-                return True
+                return VisualAnalysisClaim(1)
             status = VisualRunStatus(row["status"])
             eligible = (
                 (status is VisualRunStatus.PENDING and row["interruption_category"] is None)
@@ -803,12 +810,13 @@ class SQLitePortfolioRepository:
                 or (status in {VisualRunStatus.COMPLETED, VisualRunStatus.SKIPPED} and refresh)
             )
             if not eligible:
-                return False
+                return None
+            next_generation = int(row["attempts"]) + 1
             connection.execute(
                 """
                 UPDATE visual_analysis_runs
                 SET status = 'running',
-                    attempts = attempts + 1,
+                    attempts = ?,
                     started_at = ?,
                     updated_at = ?,
                     error_category = NULL,
@@ -820,9 +828,88 @@ class SQLitePortfolioRepository:
                   AND analyzer_name = ? AND analyzer_version = ?
                   AND configuration_version = ?
                 """,
-                (timestamp, timestamp, *key),
+                (next_generation, timestamp, timestamp, *key),
             )
-            return True
+            return VisualAnalysisClaim(next_generation)
+
+    def recover_stale_visual_analysis(
+        self,
+        source: str,
+        portfolio_source_id: str,
+        identity: AnalyzerIdentity,
+        cutoff: datetime,
+        *,
+        dry_run: bool,
+        at: datetime | None = None,
+    ) -> VisualAnalysisRecoveryResult:
+        """Inspect or recover exact-identity running attempts at an inclusive cutoff."""
+        self.initialize()
+        if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+            raise ValueError("stale recovery cutoff must be timezone-aware")
+        cutoff_utc = cutoff.astimezone(UTC)
+        recovery_timestamp = _timestamp(at)
+        connection = self._connect()
+        rows = connection.execute(
+            """
+            SELECT asset_source_id, attempts, started_at
+            FROM visual_analysis_runs
+            WHERE source = ? AND portfolio_source_id = ?
+              AND analyzer_name = ? AND analyzer_version = ?
+              AND configuration_version = ? AND status = 'running'
+            ORDER BY asset_source_id
+            """,
+            (
+                source,
+                portfolio_source_id,
+                identity.name,
+                identity.version,
+                identity.configuration_version,
+            ),
+        ).fetchall()
+        candidates = []
+        for row in rows:
+            started_at = _read_timestamp(row["started_at"])
+            if started_at is not None and started_at.astimezone(UTC) <= cutoff_utc:
+                candidates.append(row)
+        too_recent = len(rows) - len(candidates)
+        if dry_run:
+            return VisualAnalysisRecoveryResult(len(rows), len(candidates), too_recent, 0, 0, True)
+
+        recovered = 0
+        no_longer_eligible = 0
+        with self._immediate_transaction() as transaction:
+            for row in candidates:
+                cursor = transaction.execute(
+                    """
+                    UPDATE visual_analysis_runs
+                    SET status = 'pending', updated_at = ?,
+                        interruption_category = 'stale_recovered', interrupted_at = ?,
+                        error_category = NULL, error_message = NULL, skip_reason = NULL
+                    WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
+                      AND analyzer_name = ? AND analyzer_version = ?
+                      AND configuration_version = ? AND status = 'running'
+                      AND attempts = ? AND started_at = ?
+                    """,
+                    (
+                        recovery_timestamp,
+                        recovery_timestamp,
+                        source,
+                        portfolio_source_id,
+                        row["asset_source_id"],
+                        identity.name,
+                        identity.version,
+                        identity.configuration_version,
+                        row["attempts"],
+                        row["started_at"],
+                    ),
+                )
+                if cursor.rowcount == 1:
+                    recovered += 1
+                else:
+                    no_longer_eligible += 1
+        return VisualAnalysisRecoveryResult(
+            len(rows), len(candidates), too_recent, recovered, no_longer_eligible, False
+        )
 
     def complete_visual_analysis(
         self,
@@ -832,6 +919,7 @@ class SQLitePortfolioRepository:
         identity: AnalyzerIdentity,
         results: tuple[VisualResult, ...],
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Atomically replace exact-identity results and complete the attempt."""
@@ -850,7 +938,7 @@ class SQLitePortfolioRepository:
             )
         key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
         with self._immediate_transaction() as connection:
-            self._require_running(connection, key)
+            self._require_owned_running(connection, key, expected_generation)
             connection.execute(
                 """
                 DELETE FROM visual_analysis_results
@@ -909,6 +997,7 @@ class SQLitePortfolioRepository:
         category: str,
         message: str,
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Fail the current attempt while retaining any successful snapshot."""
@@ -918,6 +1007,7 @@ class SQLitePortfolioRepository:
             asset_source_id,
             identity,
             VisualRunStatus.FAILED,
+            expected_generation=expected_generation,
             at=at,
             category=category,
             message=message,
@@ -931,6 +1021,7 @@ class SQLitePortfolioRepository:
         identity: AnalyzerIdentity,
         category: str = "cancelled",
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Return a running attempt to pending while retaining interruption evidence."""
@@ -940,6 +1031,7 @@ class SQLitePortfolioRepository:
             asset_source_id,
             identity,
             VisualRunStatus.PENDING,
+            expected_generation=expected_generation,
             at=at,
             category=category,
         )
@@ -952,6 +1044,7 @@ class SQLitePortfolioRepository:
         identity: AnalyzerIdentity,
         reason: str,
         *,
+        expected_generation: int,
         at: datetime | None = None,
     ) -> None:
         """Mark the running attempt skipped without creating results."""
@@ -961,6 +1054,7 @@ class SQLitePortfolioRepository:
             asset_source_id,
             identity,
             VisualRunStatus.SKIPPED,
+            expected_generation=expected_generation,
             at=at,
             message=reason,
         )
@@ -973,6 +1067,7 @@ class SQLitePortfolioRepository:
         identity: AnalyzerIdentity,
         status: VisualRunStatus,
         *,
+        expected_generation: int,
         at: datetime | None,
         category: str | None = None,
         message: str | None = None,
@@ -980,7 +1075,7 @@ class SQLitePortfolioRepository:
         timestamp = _timestamp(at)
         key = self._visual_key(source, portfolio_source_id, asset_source_id, identity)
         with self._immediate_transaction() as connection:
-            self._require_running(connection, key)
+            self._require_owned_running(connection, key, expected_generation)
             connection.execute(
                 """
                 UPDATE visual_analysis_runs
@@ -1038,21 +1133,26 @@ class SQLitePortfolioRepository:
             raise KeyError(f"asset not found: {asset_source_id}")
 
     @staticmethod
-    def _require_running(
+    def _require_owned_running(
         connection: sqlite3.Connection,
         key: tuple[str, str, str, str, str, str],
+        expected_generation: int,
     ) -> None:
         row = connection.execute(
             """
-            SELECT status FROM visual_analysis_runs
+            SELECT status, attempts FROM visual_analysis_runs
             WHERE source = ? AND portfolio_source_id = ? AND asset_source_id = ?
               AND analyzer_name = ? AND analyzer_version = ?
               AND configuration_version = ?
             """,
             key,
         ).fetchone()
-        if row is None or row["status"] != VisualRunStatus.RUNNING.value:
-            raise ValueError("visual analysis identity does not have a running attempt")
+        if (
+            row is None
+            or row["status"] != VisualRunStatus.RUNNING.value
+            or row["attempts"] != expected_generation
+        ):
+            raise VisualAnalysisOwnershipLostError("visual-analysis attempt ownership was lost")
 
     @staticmethod
     def _read_visual_state(row: sqlite3.Row) -> VisualRunState:

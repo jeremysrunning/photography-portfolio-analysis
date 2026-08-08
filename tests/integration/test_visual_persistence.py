@@ -1,11 +1,17 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
+from threading import Barrier
 
 import pytest
 
 from ppa.models import Asset, AssetMetadata, MediaType, Portfolio, SourceReference
-from ppa.storage import SQLitePortfolioRepository
+from ppa.storage import (
+    SQLitePortfolioRepository,
+    VisualAnalysisClaim,
+    VisualAnalysisOwnershipLostError,
+    VisualAnalysisRecoveryResult,
+)
 from ppa.storage.sqlite import SCHEMA_VERSION
 from ppa.visual import (
     AnalyzerIdentity,
@@ -49,6 +55,182 @@ def _repository(database) -> SQLitePortfolioRepository:
     return repository
 
 
+def test_stale_recovery_dry_run_and_inclusive_confirmed_transition(tmp_path) -> None:
+    repository = _repository(tmp_path / "portfolio.sqlite3")
+    claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert claim == VisualAnalysisClaim(1)
+
+    dry_run = repository.recover_stale_visual_analysis(
+        "test", "portfolio-1", IDENTITY, T0, dry_run=True, at=T0 + timedelta(hours=1)
+    )
+    assert dry_run.running_examined == 1
+    assert dry_run.cutoff_candidates == 1
+    assert dry_run.too_recent == 0
+    assert dry_run.recovered == 0
+    assert dry_run.dry_run is True
+    assert (
+        repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY).state.status
+        is VisualRunStatus.RUNNING
+    )
+
+    recovered = repository.recover_stale_visual_analysis(
+        "test", "portfolio-1", IDENTITY, T0, dry_run=False, at=T0 + timedelta(hours=1)
+    )
+    assert recovered.recovered == 1
+    state = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY).state
+    assert state.status is VisualRunStatus.PENDING
+    assert state.attempts == 1
+    assert state.started_at == T0
+    assert state.interruption_category == "stale_recovered"
+
+
+def test_stale_recovery_preserves_successful_snapshot_and_resume_matrix(tmp_path) -> None:
+    repository = _repository(tmp_path / "portfolio.sqlite3")
+    first = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert first is not None
+    repository.complete_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result(),),
+        expected_generation=first.attempt_generation,
+        at=T0 + timedelta(minutes=1),
+    )
+    refresh = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, refresh=True, at=T0 + timedelta(hours=1)
+    )
+    assert refresh == VisualAnalysisClaim(2)
+    repository.recover_stale_visual_analysis(
+        "test",
+        "portfolio-1",
+        IDENTITY,
+        T0 + timedelta(hours=1),
+        dry_run=False,
+        at=T0 + timedelta(hours=2),
+    )
+    snapshot = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    assert snapshot.state.status is VisualRunStatus.PENDING
+    assert snapshot.state.last_successful_completed_at == T0 + timedelta(minutes=1)
+    assert [result.name for result in snapshot.results] == ["brightness"]
+    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY) is None
+    retried = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, retry_failed=True
+    )
+    assert retried == VisualAnalysisClaim(3)
+
+
+def test_concurrent_stale_recovery_changes_one_generation_once(tmp_path) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    repository = _repository(database)
+    assert repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, at=T0
+    ) == VisualAnalysisClaim(1)
+    repository.close()
+
+    def recover():
+        with SQLitePortfolioRepository(database) as worker:
+            return worker.recover_stale_visual_analysis(
+                "test",
+                "portfolio-1",
+                IDENTITY,
+                T0,
+                dry_run=False,
+                at=T0 + timedelta(hours=1),
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = tuple(executor.map(lambda _: recover(), range(2)))
+    assert sum(outcome.recovered for outcome in outcomes) == 1
+    with SQLitePortfolioRepository(database) as check:
+        snapshot = check.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    assert snapshot.state.status is VisualRunStatus.PENDING
+    assert snapshot.state.attempts == 1
+
+
+def test_concurrent_completion_versus_stale_recovery_yields_one_legal_outcome(tmp_path) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    repository = _repository(database)
+    first = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert first == VisualAnalysisClaim(1)
+    repository.complete_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result("brightness", 0.4),),
+        expected_generation=first.attempt_generation,
+        at=T0 + timedelta(minutes=1),
+    )
+    refresh = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, refresh=True, at=T0 + timedelta(hours=1)
+    )
+    assert refresh == VisualAnalysisClaim(2)
+    repository.close()
+
+    barrier = Barrier(2)
+    completion_outcome: dict[str, str] = {}
+    recovery_outcome: dict[str, VisualAnalysisRecoveryResult] = {}
+
+    def complete() -> None:
+        with SQLitePortfolioRepository(database) as worker:
+            barrier.wait(timeout=10)
+            try:
+                worker.complete_visual_analysis(
+                    "test",
+                    "portfolio-1",
+                    "asset-1",
+                    IDENTITY,
+                    (_result("brightness", 0.9),),
+                    expected_generation=refresh.attempt_generation,
+                    at=T0 + timedelta(hours=1, minutes=5),
+                )
+                completion_outcome["status"] = "completed"
+            except VisualAnalysisOwnershipLostError:
+                completion_outcome["status"] = "ownership_lost"
+
+    def recover() -> None:
+        with SQLitePortfolioRepository(database) as worker:
+            barrier.wait(timeout=10)
+            recovery_outcome["result"] = worker.recover_stale_visual_analysis(
+                "test",
+                "portfolio-1",
+                IDENTITY,
+                T0 + timedelta(hours=1),
+                dry_run=False,
+                at=T0 + timedelta(hours=2),
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(complete), executor.submit(recover)]
+        for future in futures:
+            future.result(timeout=10)
+
+    with SQLitePortfolioRepository(database) as check:
+        snapshot = check.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    recovered = recovery_outcome["result"]
+
+    if snapshot.state.status is VisualRunStatus.COMPLETED:
+        assert completion_outcome["status"] == "completed"
+        assert recovered.recovered == 0
+        assert snapshot.state.interruption_category is None
+        assert snapshot.state.attempts == 2
+        assert snapshot.state.last_successful_completed_at == T0 + timedelta(hours=1, minutes=5)
+        assert [result.name for result in snapshot.results] == ["brightness"]
+        assert snapshot.results[0].value == pytest.approx(0.9)
+    elif snapshot.state.status is VisualRunStatus.PENDING:
+        assert completion_outcome["status"] == "ownership_lost"
+        assert recovered.recovered == 1
+        assert snapshot.state.interruption_category == "stale_recovered"
+        assert snapshot.state.attempts == 2
+        assert snapshot.state.started_at == T0 + timedelta(hours=1)
+        assert snapshot.state.last_successful_completed_at == T0 + timedelta(minutes=1)
+        assert [result.name for result in snapshot.results] == ["brightness"]
+        assert snapshot.results[0].value == pytest.approx(0.4)
+    else:
+        pytest.fail(f"unexpected final status: {snapshot.state.status}")
+
+
 def test_schema_v6_creation_and_v5_additive_migration(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
     repository = _repository(database)
@@ -83,7 +265,8 @@ def test_initial_claim_completion_and_round_trip_all_value_families(tmp_path) ->
     assert initial.state.attempts == 0
     assert initial.results == ()
 
-    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert claim == VisualAnalysisClaim(1)
     results = (
         _result(),
         VisualResult(
@@ -103,7 +286,13 @@ def test_initial_claim_completion_and_round_trip_all_value_families(tmp_path) ->
         _result("palette", {"colors": ["#112233", "#445566"]}),
     )
     repository.complete_visual_analysis(
-        "test", "portfolio-1", "asset-1", IDENTITY, results, at=T0 + timedelta(seconds=2)
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        results,
+        expected_generation=claim.attempt_generation,
+        at=T0 + timedelta(seconds=2),
     )
 
     snapshot = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
@@ -136,9 +325,16 @@ def test_completed_result_round_trip_preserves_timestamp_exactly(tmp_path) -> No
         unit="normalized",
         completed_at=T0,
     )
-    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    assert claim is not None
     repository.complete_visual_analysis(
-        "test", "portfolio-1", "asset-1", IDENTITY, (completed,), at=T0
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (completed,),
+        expected_generation=claim.attempt_generation,
+        at=T0,
     )
 
     loaded = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
@@ -154,9 +350,15 @@ def test_versions_and_configurations_coexist_without_overwrite(tmp_path) -> None
         AnalyzerIdentity("visual-color", "1.0.0", "defaults-v2"),
     )
     for index, identity in enumerate(identities):
-        assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", identity)
+        claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", identity)
+        assert claim is not None
         repository.complete_visual_analysis(
-            "test", "portfolio-1", "asset-1", identity, (_result(value=index),)
+            "test",
+            "portfolio-1",
+            "asset-1",
+            identity,
+            (_result(value=index),),
+            expected_generation=claim.attempt_generation,
         )
 
     assert [
@@ -182,9 +384,16 @@ def test_bulk_visual_reads_use_normalized_assets_and_include_implicit_pending(tm
     repository.save(portfolio)
     historical = AnalyzerIdentity("visual-color", "0.9.0", "defaults-v0")
     for identity in (IDENTITY, historical):
-        assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", identity, at=T0)
+        claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", identity, at=T0)
+        assert claim is not None
         repository.complete_visual_analysis(
-            "test", "portfolio-1", "asset-1", identity, (_result(),), at=T0
+            "test",
+            "portfolio-1",
+            "asset-1",
+            identity,
+            (_result(),),
+            expected_generation=claim.attempt_generation,
+            at=T0,
         )
 
     assert repository.list_visual_analysis_identities(portfolio) == (historical, IDENTITY)
@@ -199,14 +408,24 @@ def test_bulk_visual_reads_use_normalized_assets_and_include_implicit_pending(tm
 
 def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_path) -> None:
     repository = _repository(tmp_path / "portfolio.sqlite3")
-    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    first_claim = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, at=T0
+    )
+    assert first_claim == VisualAnalysisClaim(1)
     repository.complete_visual_analysis(
-        "test", "portfolio-1", "asset-1", IDENTITY, (_result(value=0.25),), at=T0
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result(value=0.25),),
+        expected_generation=first_claim.attempt_generation,
+        at=T0,
     )
 
-    assert repository.claim_visual_analysis(
+    refresh_claim = repository.claim_visual_analysis(
         "test", "portfolio-1", "asset-1", IDENTITY, refresh=True, at=T0 + timedelta(hours=1)
     )
+    assert refresh_claim == VisualAnalysisClaim(2)
     running = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
     assert running.state.status is VisualRunStatus.RUNNING
     assert running.state.last_successful_completed_at == T0
@@ -214,7 +433,12 @@ def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_pa
     assert running.results[0].completed_at == T0
 
     repository.cancel_visual_analysis(
-        "test", "portfolio-1", "asset-1", IDENTITY, at=T0 + timedelta(hours=2)
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        expected_generation=refresh_claim.attempt_generation,
+        at=T0 + timedelta(hours=2),
     )
     cancelled = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
     assert cancelled.state.status is VisualRunStatus.PENDING
@@ -224,11 +448,18 @@ def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_pa
     assert cancelled.results[0].value == 0.25
     assert cancelled.results[0].completed_at == T0
     assert not repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
-    assert repository.claim_visual_analysis(
+    retry_claim = repository.claim_visual_analysis(
         "test", "portfolio-1", "asset-1", IDENTITY, retry_failed=True
     )
+    assert retry_claim == VisualAnalysisClaim(3)
     repository.fail_visual_analysis(
-        "test", "portfolio-1", "asset-1", IDENTITY, "decode", "sanitized failure"
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        "decode",
+        "sanitized failure",
+        expected_generation=retry_claim.attempt_generation,
     )
     failed = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
     assert failed.state.status is VisualRunStatus.FAILED
@@ -240,13 +471,21 @@ def test_refresh_failure_and_cancellation_retain_last_successful_snapshot(tmp_pa
 
 def test_successful_refresh_atomically_replaces_snapshot(tmp_path) -> None:
     repository = _repository(tmp_path / "portfolio.sqlite3")
-    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    first_claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    assert first_claim is not None
     repository.complete_visual_analysis(
-        "test", "portfolio-1", "asset-1", IDENTITY, (_result("old", 1),), at=T0
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result("old", 1),),
+        expected_generation=first_claim.attempt_generation,
+        at=T0,
     )
-    assert repository.claim_visual_analysis(
+    refresh_claim = repository.claim_visual_analysis(
         "test", "portfolio-1", "asset-1", IDENTITY, refresh=True
     )
+    assert refresh_claim is not None
     replacement_time = T0 + timedelta(days=1)
     repository.complete_visual_analysis(
         "test",
@@ -254,6 +493,7 @@ def test_successful_refresh_atomically_replaces_snapshot(tmp_path) -> None:
         "asset-1",
         IDENTITY,
         (_result("new", 2),),
+        expected_generation=refresh_claim.attempt_generation,
         at=replacement_time,
     )
 
@@ -266,13 +506,21 @@ def test_successful_refresh_atomically_replaces_snapshot(tmp_path) -> None:
 def test_result_replacement_rolls_back_on_failure(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
     repository = _repository(database)
-    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    first_claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    assert first_claim is not None
     repository.complete_visual_analysis(
-        "test", "portfolio-1", "asset-1", IDENTITY, (_result("old", 1),), at=T0
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result("old", 1),),
+        expected_generation=first_claim.attempt_generation,
+        at=T0,
     )
-    assert repository.claim_visual_analysis(
+    refresh_claim = repository.claim_visual_analysis(
         "test", "portfolio-1", "asset-1", IDENTITY, refresh=True
     )
+    assert refresh_claim is not None
     with sqlite3.connect(database) as connection:
         connection.execute(
             """
@@ -290,6 +538,7 @@ def test_result_replacement_rolls_back_on_failure(tmp_path) -> None:
             "asset-1",
             IDENTITY,
             (_result("replacement", 2), _result("reject", 3)),
+            expected_generation=refresh_claim.attempt_generation,
         )
     snapshot = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
     assert snapshot.state.status is VisualRunStatus.RUNNING
@@ -298,27 +547,131 @@ def test_result_replacement_rolls_back_on_failure(tmp_path) -> None:
     assert snapshot.results[0].completed_at == T0
 
 
+def test_claim_generation_increments_once_per_successful_claim(tmp_path) -> None:
+    repository = _repository(tmp_path / "portfolio.sqlite3")
+    first = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    assert first == VisualAnalysisClaim(1)
+    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY) is None
+
+    repository.cancel_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        expected_generation=first.attempt_generation,
+    )
+    second = repository.claim_visual_analysis(
+        "test", "portfolio-1", "asset-1", IDENTITY, retry_failed=True
+    )
+    assert second == VisualAnalysisClaim(2)
+
+
+@pytest.mark.parametrize("transition", ["complete", "fail", "cancel", "skip"])
+def test_older_generation_terminal_transition_preserves_newer_attempt_and_snapshot(
+    tmp_path, transition
+) -> None:
+    repository = _repository(tmp_path / f"{transition}.sqlite3")
+    first = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, at=T0)
+    assert first == VisualAnalysisClaim(1)
+    repository.complete_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        (_result("retained", 1),),
+        expected_generation=first.attempt_generation,
+        at=T0,
+    )
+    second = repository.claim_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        refresh=True,
+        at=T0 + timedelta(hours=1),
+    )
+    assert second == VisualAnalysisClaim(2)
+    before = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+
+    with pytest.raises(
+        VisualAnalysisOwnershipLostError,
+        match="attempt ownership was lost",
+    ):
+        if transition == "complete":
+            repository.complete_visual_analysis(
+                "test",
+                "portfolio-1",
+                "asset-1",
+                IDENTITY,
+                (_result("replacement", 2),),
+                expected_generation=first.attempt_generation,
+            )
+        elif transition == "fail":
+            repository.fail_visual_analysis(
+                "test",
+                "portfolio-1",
+                "asset-1",
+                IDENTITY,
+                "late",
+                "sanitized",
+                expected_generation=first.attempt_generation,
+            )
+        elif transition == "cancel":
+            repository.cancel_visual_analysis(
+                "test",
+                "portfolio-1",
+                "asset-1",
+                IDENTITY,
+                expected_generation=first.attempt_generation,
+            )
+        else:
+            repository.skip_visual_analysis(
+                "test",
+                "portfolio-1",
+                "asset-1",
+                IDENTITY,
+                "late skip",
+                expected_generation=first.attempt_generation,
+            )
+
+    after = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
+    assert after == before
+    assert after.state.status is VisualRunStatus.RUNNING
+    assert after.state.attempts == second.attempt_generation
+    assert after.state.last_successful_completed_at == T0
+    assert [(result.name, result.value) for result in after.results] == [("retained", 1)]
+
+
 def test_exact_identity_claim_is_concurrency_safe(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
     repository = _repository(database)
     repository.close()
 
-    def claim() -> bool:
+    def claim() -> VisualAnalysisClaim | None:
         with SQLitePortfolioRepository(database) as candidate:
             return candidate.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         outcomes = tuple(executor.map(lambda _: claim(), range(2)))
 
-    assert sorted(outcomes) == [False, True]
+    assert sum(outcome is not None for outcome in outcomes) == 1
+    assert {outcome.attempt_generation for outcome in outcomes if outcome is not None} == {1}
 
 
 def test_skip_and_foreign_key_enforcement(tmp_path) -> None:
     repository = _repository(tmp_path / "portfolio.sqlite3")
     with pytest.raises(KeyError, match="missing"):
         repository.claim_visual_analysis("test", "portfolio-1", "missing", IDENTITY)
-    assert repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
-    repository.skip_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY, "not applicable")
+    claim = repository.claim_visual_analysis("test", "portfolio-1", "asset-1", IDENTITY)
+    assert claim is not None
+    repository.skip_visual_analysis(
+        "test",
+        "portfolio-1",
+        "asset-1",
+        IDENTITY,
+        "not applicable",
+        expected_generation=claim.attempt_generation,
+    )
     snapshot = repository.visual_analysis_snapshot("test", "portfolio-1", "asset-1", IDENTITY)
     assert snapshot.state.status is VisualRunStatus.SKIPPED
     assert snapshot.state.skip_reason == "not applicable"

@@ -224,11 +224,26 @@ users may explicitly select one through four. The scheduler keeps at most that m
 passes in flight.
 
 Completed and skipped identities are retained unless refresh is explicit. Durable failures
-and cancellation-interrupted pending identities require explicit retry. Existing `running`
-identities are never reclaimed or mutated because schema version 6 has no lease, owner,
-heartbeat, or stale-run policy. They are reported separately. A future focused issue may
-define deliberate stale-run recovery. It must not be inferred from age alone without an
-ownership design.
+and cancellation-interrupted pending identities require explicit retry.
+
+Every claim owns an exact attempt generation: the current `attempts` count. A terminal
+transition (complete, fail, cancel, skip) must observe that same generation and the
+identity must still be `running`, or it is rejected as an ownership-loss error and mutates
+nothing. This makes a late worker from a superseded attempt structurally unable to alter
+results, independent of any lease, heartbeat, or process-liveness check.
+
+Existing `running` identities are never reclaimed automatically. There is no lease,
+heartbeat, or process-discovery mechanism, and age alone is never treated as proof that a
+worker died — schema version 8 has no concept of worker liveness to consult. An operator
+may instead run an explicit, source-free stale-recovery inspection or, with confirmation,
+recovery for one exact analyzer identity: eligible `running` rows at or before an inclusive
+UTC `started_at` cutoff transition to `pending` with a `stale_recovered` interruption
+category, retaining their attempt count, `started_at`, and any retained successful
+snapshot. Recovery is fenced the same way terminal transitions are — inside one immediate
+transaction keyed on the observed generation — so a concurrent completion and a concurrent
+recovery cannot both win, and concurrent recoveries cannot double-recover one row. Recovered
+work resumes only through an explicit `--retry-failed` claim, never automatically. No
+migration accompanies this: recovery only reinterprets existing run-state columns.
 
 Missing previews are recorded as neutrally skipped. Corrupt, unsupported, oversized,
 dimension-mismatched, original-rejected, analyzer, and exhausted transient failures are

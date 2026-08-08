@@ -1,6 +1,9 @@
 from collections.abc import Iterator
 from importlib import import_module
 
+import pytest
+
+from ppa.analysis import get_visual_analyzer
 from ppa.analysis.visual import register_visual_analyzer
 from ppa.cli import main
 from ppa.core.visual_workflow import VisualWorkflowResult
@@ -22,6 +25,95 @@ def test_init_db_command_creates_database(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
     assert main(["init-db", str(database)]) == 0
     assert database.exists()
+
+
+@pytest.mark.parametrize(
+    "value", ["0m", "-1h", "1.5h", " 1h", "1h ", "1h30m", "1w", "999999999999999999999999d"]
+)
+def test_visual_stale_recovery_rejects_invalid_duration(value) -> None:
+    with pytest.raises(SystemExit) as raised:
+        main(
+            [
+                "analyze",
+                "visual",
+                "missing.sqlite3",
+                "--analyzer",
+                "color-luminance",
+                "--recover-stale",
+                "--stale-after",
+                value,
+            ]
+        )
+    assert raised.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["--refresh", "--retry-failed", "--only-failed", "--workers", "--limit", "--gallery", "--year"],
+)
+def test_visual_stale_recovery_rejects_execution_flags(flag) -> None:
+    value_flags = {"--workers": "1", "--limit": "1", "--gallery": "gallery", "--year": "2024"}
+    command = [
+        "analyze",
+        "visual",
+        "missing.sqlite3",
+        "--analyzer",
+        "color-luminance",
+        "--recover-stale",
+        "--stale-after",
+        "1h",
+        flag,
+    ]
+    if flag in value_flags:
+        command.append(value_flags[flag])
+    with pytest.raises(SystemExit) as raised:
+        main(command)
+    assert raised.value.code == 2
+
+
+def test_visual_stale_recovery_is_source_free_and_dry_run_by_default(tmp_path, capsys) -> None:
+    database = tmp_path / "portfolio.sqlite3"
+    portfolio = Portfolio(
+        "test",
+        SourceReference("portfolio", "https://example.test/portfolio"),
+        "Portfolio",
+        assets=(
+            Asset(
+                SourceReference("asset", "https://example.test/asset"),
+                AssetMetadata(MediaType.PHOTOGRAPH),
+            ),
+        ),
+    )
+    analyzer = get_visual_analyzer("color-luminance")
+    assert analyzer is not None
+    with SQLitePortfolioRepository(database) as repository:
+        repository.save(portfolio)
+        assert (
+            repository.claim_visual_analysis("test", "portfolio", "asset", analyzer.identity)
+            is not None
+        )
+    assert (
+        main(
+            [
+                "analyze",
+                "visual",
+                str(database),
+                "--source",
+                "test",
+                "--source-id",
+                "portfolio",
+                "--analyzer",
+                "color-luminance",
+                "--recover-stale",
+                "--stale-after",
+                "1d",
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out
+    assert "Mode: Dry run" in output
+    assert "asset" not in output
 
 
 def test_visual_command_lists_registered_production_analyzers(capsys) -> None:

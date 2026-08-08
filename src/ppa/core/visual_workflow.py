@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 from threading import Event
@@ -28,8 +29,12 @@ from ppa.sources import (
     SourceTransientError,
 )
 from ppa.sources.smugmug import SmugMugSource
-from ppa.storage import SQLitePortfolioRepository
-from ppa.visual import VisualRunStatus
+from ppa.storage import (
+    SQLitePortfolioRepository,
+    VisualAnalysisOwnershipLostError,
+    VisualAnalysisRecoveryResult,
+)
+from ppa.visual import AnalyzerIdentity, VisualRunStatus
 
 ProgressCallback = Callable[["VisualProgress"], None]
 SourceFactory = Callable[[Portfolio, str], GallerySource]
@@ -40,6 +45,32 @@ Sleeper = Callable[[float], None]
 
 class VisualWorkflowError(RuntimeError):
     """Raised when visual analysis cannot safely begin."""
+
+
+def recover_stale_visual_analysis(
+    portfolio: Portfolio,
+    database: Path,
+    identity: AnalyzerIdentity,
+    stale_after: timedelta,
+    *,
+    confirm: bool,
+    at: datetime | None = None,
+    repository_factory: RepositoryFactory = SQLitePortfolioRepository,
+) -> VisualAnalysisRecoveryResult:
+    """Inspect or explicitly recover stale running work for one exact identity."""
+    recovery_time = (at or datetime.now(UTC)).astimezone(UTC)
+    if stale_after <= timedelta(0):
+        raise ValueError("stale-after must be positive")
+    cutoff = recovery_time - stale_after
+    with repository_factory(database) as repository:
+        return repository.recover_stale_visual_analysis(
+            portfolio.source_name,
+            portfolio.source_id,
+            identity,
+            cutoff,
+            dry_run=not confirm,
+            at=recovery_time,
+        )
 
 
 class _UnexpectedEmptyResults(RuntimeError):
@@ -57,6 +88,7 @@ class VisualOutcomeKind(StrEnum):
     ALREADY_COMPLETED = "already_completed"
     EXISTING_FAILED = "existing_failed"
     EXISTING_SKIPPED = "existing_skipped"
+    OWNERSHIP_LOST = "ownership_lost"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +136,7 @@ class VisualProgress:
     processing_rate: float | None
     estimated_seconds_remaining: float | None
     downloaded_bytes: int
+    ownership_lost: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +160,7 @@ class VisualWorkflowResult:
     elapsed_seconds: float
     processing_rate: float | None
     downloaded_bytes: int
+    ownership_lost: int = 0
     rate_limited: bool = False
     configuration_failed: bool = False
     cancelled_by_user: bool = False
@@ -241,6 +275,7 @@ def run_visual_analysis(
         "already_completed": 0,
         "existing_failed": 0,
         "existing_skipped": 0,
+        "ownership_lost": 0,
     }
     rate_limited = False
     configuration_failed = False
@@ -327,6 +362,7 @@ def run_visual_analysis(
             "already_completed",
             "existing_failed",
             "existing_skipped",
+            "ownership_lost",
         )
     )
     remaining = len(pending) - processed
@@ -349,6 +385,7 @@ def run_visual_analysis(
         elapsed_seconds=elapsed,
         processing_rate=rate,
         downloaded_bytes=counters["downloaded_bytes"],
+        ownership_lost=counters["ownership_lost"],
         rate_limited=rate_limited,
         configuration_failed=configuration_failed,
         cancelled_by_user=cancelled_by_user,
@@ -381,7 +418,7 @@ def _process_asset(
             or current.state.interruption_category != target.interruption_category
         ):
             return _outcome_for_state(current.state.status)
-        claimed = repository.claim_visual_analysis(
+        claim = repository.claim_visual_analysis(
             portfolio.source_name,
             portfolio.source_id,
             asset.source_id,
@@ -389,19 +426,22 @@ def _process_asset(
             retry_failed=options.retry_failed or options.only_failed,
             refresh=options.refresh,
         )
-        if not claimed:
+        if claim is None:
             latest = repository.visual_analysis_snapshot(
                 portfolio.source_name, portfolio.source_id, asset.source_id, analyzer.identity
             )
             return _outcome_for_state(latest.state.status)
         if event.is_set():
-            repository.cancel_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
+            return _persist_outcome(
+                lambda: repository.cancel_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.CANCELLED,
             )
-            return _Outcome(VisualOutcomeKind.CANCELLED)
         source = source_factory(portfolio, api_key)
         try:
             resource = _open_preview(source, asset, analyzer, event, options, sleeper)
@@ -411,97 +451,141 @@ def _process_asset(
                 if not results and not allows_empty_results(analyzer):
                     raise _UnexpectedEmptyResults
             if event.is_set():
-                repository.cancel_visual_analysis(
+                return _persist_outcome(
+                    lambda: repository.cancel_visual_analysis(
+                        portfolio.source_name,
+                        portfolio.source_id,
+                        asset.source_id,
+                        analyzer.identity,
+                        expected_generation=claim.attempt_generation,
+                    ),
+                    VisualOutcomeKind.CANCELLED,
+                    downloaded_bytes,
+                )
+            return _persist_outcome(
+                lambda: repository.complete_visual_analysis(
                     portfolio.source_name,
                     portfolio.source_id,
                     asset.source_id,
                     analyzer.identity,
-                )
-                return _Outcome(VisualOutcomeKind.CANCELLED, downloaded_bytes)
-            repository.complete_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                results,
+                    results,
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.COMPLETED,
+                downloaded_bytes,
             )
-            return _Outcome(VisualOutcomeKind.COMPLETED, downloaded_bytes)
         except SourcePreviewCancelledError:
-            repository.cancel_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
+            return _persist_outcome(
+                lambda: repository.cancel_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.CANCELLED,
             )
-            return _Outcome(VisualOutcomeKind.CANCELLED)
         except (SourceAuthenticationError, SourceAuthorizationError):
-            repository.cancel_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                "source_access",
+            return _persist_outcome(
+                lambda: repository.cancel_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    "source_access",
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.AUTHENTICATION,
             )
-            return _Outcome(VisualOutcomeKind.AUTHENTICATION)
         except SourceRateLimitError:
-            repository.fail_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                "rate_limited",
-                "Preview access remained rate-limited after bounded retries.",
+            return _persist_outcome(
+                lambda: repository.fail_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    "rate_limited",
+                    "Preview access remained rate-limited after bounded retries.",
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.RATE_LIMITED,
             )
-            return _Outcome(VisualOutcomeKind.RATE_LIMITED)
         except _PERMANENT_PREVIEW_FAILURES:
-            repository.fail_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                "preview_invalid",
-                "The bounded preview could not be analyzed safely.",
+            return _persist_outcome(
+                lambda: repository.fail_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    "preview_invalid",
+                    "The bounded preview could not be analyzed safely.",
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.FAILED,
             )
-            return _Outcome(VisualOutcomeKind.FAILED)
         except SourcePreviewUnavailableError:
-            repository.skip_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                "preview unavailable",
+            return _persist_outcome(
+                lambda: repository.skip_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    "preview unavailable",
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.SKIPPED,
             )
-            return _Outcome(VisualOutcomeKind.SKIPPED)
         except SourceTransientError:
-            repository.fail_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                "preview_transient",
-                "Preview access failed after bounded retries.",
+            return _persist_outcome(
+                lambda: repository.fail_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    "preview_transient",
+                    "Preview access failed after bounded retries.",
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.FAILED,
             )
-            return _Outcome(VisualOutcomeKind.FAILED)
         except _UnexpectedEmptyResults:
-            repository.fail_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                "analyzer_output",
-                "The selected visual analyzer returned no results unexpectedly.",
+            return _persist_outcome(
+                lambda: repository.fail_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    "analyzer_output",
+                    "The selected visual analyzer returned no results unexpectedly.",
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.FAILED,
             )
-            return _Outcome(VisualOutcomeKind.FAILED)
         except Exception:
-            repository.fail_visual_analysis(
-                portfolio.source_name,
-                portfolio.source_id,
-                asset.source_id,
-                analyzer.identity,
-                "analyzer_error",
-                "The selected visual analyzer did not complete.",
+            return _persist_outcome(
+                lambda: repository.fail_visual_analysis(
+                    portfolio.source_name,
+                    portfolio.source_id,
+                    asset.source_id,
+                    analyzer.identity,
+                    "analyzer_error",
+                    "The selected visual analyzer did not complete.",
+                    expected_generation=claim.attempt_generation,
+                ),
+                VisualOutcomeKind.FAILED,
             )
-            return _Outcome(VisualOutcomeKind.FAILED)
+
+
+def _persist_outcome(
+    transition: Callable[[], None],
+    kind: VisualOutcomeKind,
+    downloaded_bytes: int = 0,
+) -> _Outcome:
+    try:
+        transition()
+    except VisualAnalysisOwnershipLostError:
+        return _Outcome(VisualOutcomeKind.OWNERSHIP_LOST, downloaded_bytes)
+    return _Outcome(kind, downloaded_bytes)
 
 
 def _open_preview(
@@ -626,6 +710,7 @@ def _emit_progress(
             "already_completed",
             "existing_failed",
             "existing_skipped",
+            "ownership_lost",
         )
     )
     remaining = max(0, selected - processed)
@@ -645,6 +730,7 @@ def _emit_progress(
             rate,
             eta,
             counters["downloaded_bytes"],
+            counters["ownership_lost"],
         )
     )
 

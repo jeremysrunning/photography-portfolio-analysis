@@ -43,7 +43,8 @@ def test_yunet_landmark_sentinels_never_reach_sqlite(tmp_path) -> None:
     database = tmp_path / "portfolio.sqlite3"
     with SQLitePortfolioRepository(database) as repository:
         repository.save(portfolio)
-        assert repository.claim_visual_analysis("test", "portfolio", "asset", ANALYZER_IDENTITY)
+        claim = repository.claim_visual_analysis("test", "portfolio", "asset", ANALYZER_IDENTITY)
+        assert claim is not None
         results = analyzer.analyze(asset, Image.new("RGB", (100, 100)), None)  # type: ignore[arg-type]
         repository.complete_visual_analysis(
             "test",
@@ -51,6 +52,7 @@ def test_yunet_landmark_sentinels_never_reach_sqlite(tmp_path) -> None:
             "asset",
             ANALYZER_IDENTITY,
             results,
+            expected_generation=claim.attempt_generation,
             at=datetime(2026, 7, 30, tzinfo=UTC),
         )
         loaded = repository.visual_analysis_snapshot(
