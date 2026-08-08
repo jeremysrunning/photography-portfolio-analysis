@@ -33,8 +33,6 @@ Completed:
 - deterministic visual-habits reporting over persisted production measurements
 - normalized and persisted typed aperture, exact exposure time, ISO, exact exposure
   compensation, and flash evidence
-- attempt-generation ownership fencing and explicit, operator-confirmed stale
-  visual-analysis recovery
 - bounded NanoDet/YuNet calibration research and replacement-detector documentary research
 
 Next:
